@@ -58,15 +58,15 @@ try
     timingParams.fixationMs     = 300;  % 응시점 제시 시간(ms)
     timingParams.stimDurationMs = 500;  % 각 자극 제시 시간(ms)
     timingParams.isiDurationMs  = 1000; % 자극 사이 공백 지속 시간(ms)
-    timingParams.postTrialMs    = 1000; % 반응 대기 및 안내 문구 표시 시간(ms)
+    timingParams.postTrialMs    = 2000; % 반응 대기 및 안내 문구 표시 시간(ms)
 
     comboRepeats = 1;                   % 자극 조합 반복 횟수
     stimCombos = {'MM','SM','MS','SS'}; % 움직임/정지 조합(M: 움직임, S: 정지)
 
     gridConfig.rows = 6;
     gridConfig.cols = 6;
-    gridConfig.windowWidthDeg = 6 * 2.65;       % 자극 제시 창의 가로 크기(시야각)
-    gridConfig.windowHeightDeg = 6 * 2.65;      % 자극 제시 창의 세로 크기(시야각)
+    gridConfig.windowWidthDeg = 6 * 2;       % 자극 제시 창의 가로 크기(시야각)
+    gridConfig.windowHeightDeg = 6 * 2;      % 자극 제시 창의 세로 크기(시야각)
     gridConfig.maxJitterDeg = 0.12;             % 셀 중심 기준 최대 지터(시야각)
     gridConfig.maxAttemptsPerCell = 50;
     gridConfig.safetyMarginDeg = dotParams.safetyMarginDeg;
