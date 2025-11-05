@@ -13,7 +13,7 @@ dp.width  = 60;                 % 사용 중인 디스플레이의 가로 폭(cm
 dp.bkColor   = [0.5 0.5 0.5];
 dp.textColor = [1 1 1];
 dp.textFont  = 'Malgun Gothic';
-dp.textSize  = 25;
+dp.textSize  = 20;
 dp.textLineSpacingMultiplier = 3;
 dp.responseInstructions = {
     double('왼쪽 방향키: T1 평균이 더 큽니다');
