@@ -25,7 +25,7 @@ dp.skipChecks = 1;
 dotParams.smallSizeDeg = 0.7;              % 작은 점 집단의 평균 지름(시야각)
 dotParams.largeSizeDeg = 1.3;              % 큰 점 집단의 평균 지름(시야각)
 dotParams.targetMeanDeg     = 1.0;         % 목표 평균 지름(시야각)
-dotParams.meanJitterDeg     = 0.05;        % 목표 평균에 추가되는 랜덤 지터 범위(시야각)
+dotParams.meanJitterDeg     = 0.005;        % 목표 평균에 추가되는 랜덤 지터 범위(시야각)
 dotParams.minSizeDeg        = 0.4;         % 생성 가능한 점의 최소 지름(시야각)
 dotParams.maxSizeDeg        = 1.8;         % 생성 가능한 점의 최대 지름(시야각)
 dotParams.gToleranceDeg     = 0.001;       % 점 생성 시 허용 오차(시야각)
@@ -69,7 +69,7 @@ gridLayout = buildCentralGridLayout(gridConfig);
 
 breakDurationSec = 15;
 
-saveFileName = sprintf('results_test9_%s.mat', datestr(now, 'yyyymmdd_HHMMSS'));
+saveFileName = sprintf('results_test11');
 
 try
     dp = OpenWindow(dp);
