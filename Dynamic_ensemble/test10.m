@@ -21,7 +21,7 @@ dp.responseInstructions = {
 };
 dp.skipChecks = 0;
 
-saveFileName = sprintf('results_test9_%s.mat', datestr(now, 'yyyymmdd_HHMMSS'));
+saveFileName = sprintf('results_test10_%s.mat', datestr(now, 'yyyymmdd_HHMMSS'));
 
 try
     dp = OpenWindow(dp);
