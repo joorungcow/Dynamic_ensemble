@@ -61,7 +61,7 @@ else
     kb.devices = PsychHID('Devices');
     kb.keysOfInterest=zeros(1,256);
 %     kb.keysOfInterest(KbName({'r', 'g', 'b', 'y', 't', 'a'})) = 1;
-    kb.keysOfInterest([kb.leftKey, kb.rightKey, kb.escKey]) = 1;
+    kb.keysOfInterest([kb.leftKey, kb.rightKey, kb.escKey, kb.spaceKey]) = 1;
     KbQueueCreate([], kb.keysOfInterest);
     % Perform some other initializations
     KbQueueStart;
