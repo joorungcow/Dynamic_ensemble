@@ -31,7 +31,7 @@ dotParams.maxSizeDeg        = 1.8;         % 생성 가능한 점의 최대 지�
 dotParams.gToleranceDeg     = 0.001;       % 점 생성 시 허용 오차(시야각)
 dotParams.jitterStdRatio    = 0.15;        % 지터 표준편차에 대한 비율
 dotParams.perceptualExponent = 0.76;       % 지각적 크기 변환에 사용하는 지수 값
-dotParams.meanDiffLevels    = [0.06 0.12 0.18 0.24 0.30 0.36]; % 두 자극 간 평균 차이 수준(시야각) 0.06 0.12 0.18 0.24 0.30 0.36
+dotParams.meanDiffLevels    = [0.06 0.12 0.18 0.24 0.30 0.36]; % 두 자극 간 평균 차이 수준(시야각)
 dotParams.safetyMarginDeg   = 0.05;        % 점이 경계에 겹치지 않도록 확보하는 안전 여유(시야각)
 
 ratioAssignments = {
@@ -150,7 +150,8 @@ try
             end
         end
 
-        abortExperiment = showStimulus(numDots, t1TargetMeanDeg, dotParams, gridLayout, gridConfig, t1Counts, t1IsMoving, motionParams, timingParams.stimDurationMs, dp, kb);
+        stim = createStimulus(numDots, t1TargetMeanDeg, dotParams, gridLayout, gridConfig, t1Counts);
+        abortExperiment = presentStimulus(dp, stim, t1IsMoving, motionParams, timingParams.stimDurationMs, kb);
         if abortExperiment
             break;
         end
@@ -160,7 +161,8 @@ try
             break;
         end
 
-        abortExperiment = showStimulus(numDots, t2TargetMeanDeg, dotParams, gridLayout, gridConfig, t2Counts, t2IsMoving, motionParams, timingParams.stimDurationMs, dp, kb);
+        stim = createStimulus(numDots, t2TargetMeanDeg, dotParams, gridLayout, gridConfig, t2Counts);
+        abortExperiment = presentStimulus(dp, stim, t2IsMoving, motionParams, timingParams.stimDurationMs, kb);
         if abortExperiment
             break;
         end
@@ -268,11 +270,6 @@ layout.cellWidthDeg = cellWidthDeg;
 layout.cellHeightDeg = cellHeightDeg;
 end
 
-function abort = showStimulus(numDots, targetMeanDeg, params, layout, gridConfig, ratioCounts, isMoving, motionParams, stimDurationMs, dp, kb)
-stim = createStimulus(numDots, targetMeanDeg, params, layout, gridConfig, ratioCounts);
-abort = presentStimulus(dp, stim, isMoving, motionParams, stimDurationMs, kb);
-end
-
 function stim = createStimulus(numDots, targetMeanDeg, params, layout, gridConfig, ratioCounts)
 stim.dotSizeDeg = generateDotSizes(numDots, targetMeanDeg, params, ratioCounts);
 [stim.xPosDeg, stim.yPosDeg] = placeDotsOnGrid(stim.dotSizeDeg, layout, gridConfig);
@@ -316,27 +313,86 @@ baseSizes = baseSizes * scaleToTarget;
 
 jitterStdDeg = params.jitterStdRatio * targetMeanDeg;
 
-for attempt = 1:maxAttempts %#ok<NASGU>
+for attempt = 1:maxAttempts 
+    if attempt == round(maxAttempts * 0.5)
+        jitterStdDeg = jitterStdDeg * 0.5;
+    elseif attempt == round(maxAttempts * 0.75)
+        jitterStdDeg = jitterStdDeg * 0.25;
+    end
+
     noise = jitterStdDeg .* randn(1, numDots);
     noise = noise - mean(noise);
 
     dotSizesDeg = baseSizes + noise;
     dotSizesDeg = min(max(dotSizesDeg, params.minSizeDeg), params.maxSizeDeg);
 
-    currentMean = mean(dotSizesDeg);
-    delta = targetMeanDeg - currentMean;
-    dotSizesDeg = dotSizesDeg + delta/numDots;
-
-    if any(dotSizesDeg < params.minSizeDeg) || any(dotSizesDeg > params.maxSizeDeg)
-        continue;
-    end
+    dotSizesDeg = adjustMeanWithinBounds(dotSizesDeg, targetMeanDeg, params);
 
     if abs(mean(dotSizesDeg) - targetMeanDeg) <= params.gToleranceDeg
         return;
     end
 end
 
-error('Could not generate dot sizes within tolerance. Adjust parameters.');
+warning('generateDotSizes:MaxAttempts', ['Could not match target mean within tolerance after %d attempts. ' ...
+    'Returning scaled base sizes without jitter. Consider relaxing constraints.'], maxAttempts);
+
+dotSizesDeg = adjustMeanWithinBounds(baseSizes, targetMeanDeg, params);
+end
+
+function dotSizesDeg = adjustMeanWithinBounds(dotSizesDeg, targetMeanDeg, params)
+numDots = numel(dotSizesDeg);
+maxAdjustIters = 50;
+tolerance = params.gToleranceDeg;
+
+for adjustIter = 1:maxAdjustIters
+    meanDiff = targetMeanDeg - mean(dotSizesDeg);
+    if abs(meanDiff) <= tolerance
+        break;
+    end
+
+    totalDiff = meanDiff * numDots;
+
+    if totalDiff > 0
+        adjustable = find(dotSizesDeg < params.maxSizeDeg - eps);
+        if isempty(adjustable)
+            break;
+        end
+
+        slack = params.maxSizeDeg - dotSizesDeg(adjustable);
+        totalSlack = sum(slack);
+        if totalSlack <= 0
+            break;
+        end
+
+        factor = min(1, totalDiff / totalSlack);
+        increments = factor .* slack;
+        dotSizesDeg(adjustable) = dotSizesDeg(adjustable) + increments;
+    else
+        adjustable = find(dotSizesDeg > params.minSizeDeg + eps);
+        if isempty(adjustable)
+            break;
+        end
+
+        slack = dotSizesDeg(adjustable) - params.minSizeDeg;
+        totalSlack = sum(slack);
+        if totalSlack <= 0
+            break;
+        end
+
+        factor = min(1, -totalDiff / totalSlack);
+        decrements = factor .* slack;
+        dotSizesDeg(adjustable) = dotSizesDeg(adjustable) - decrements;
+    end
+
+    dotSizesDeg = min(max(dotSizesDeg, params.minSizeDeg), params.maxSizeDeg);
+end
+
+if abs(mean(dotSizesDeg) - targetMeanDeg) > tolerance
+    meanOffset = targetMeanDeg - mean(dotSizesDeg);
+    dotSizesDeg = dotSizesDeg + meanOffset;
+    dotSizesDeg = min(max(dotSizesDeg, params.minSizeDeg), params.maxSizeDeg);
+end
+
 end
 
 function [xPosDeg, yPosDeg] = placeDotsOnGrid(dotSizesDeg, layout, gridConfig)
@@ -487,7 +543,9 @@ for frameIdx = 1:numFrames
 
     Screen('FillRect', dp.wPtr, dp.bkColor);
 
-    xyPix = convertCentersToPixels(stim.xPosDeg, stim.yPosDeg, dp);
+    xyPix = [stim.xPosDeg; stim.yPosDeg] * dp.ppd;
+    xyPix(1, :) = xyPix(1, :) + dp.cx;
+    xyPix(2, :) = xyPix(2, :) + dp.cy;
     sizePix = stim.dotSizeDeg * dp.ppd;
 
     Screen('DrawDots', dp.wPtr, xyPix, sizePix, [1 1 1], [0 0], 2);
@@ -515,7 +573,7 @@ end
 numFrames = max(1, round((durationMs/1000) / dp.ifi));
 vbl = Screen('Flip', dp.wPtr);
 
-for frameIdx = 1:numFrames %#ok<NASGU>
+for frameIdx = 1:numFrames 
     Screen('FillRect', dp.wPtr, dp.bkColor);
     vbl = Screen('Flip', dp.wPtr, vbl + 0.5 * dp.ifi);
 
@@ -547,7 +605,7 @@ if isfield(dp, 'textSize') && ~isempty(dp.textSize)
     Screen('TextSize', dp.wPtr, dp.textSize);
 end
 
-messageLine = '쉬는시간입니다. 스페이스바를 누르면 이어서 시작합니다.';
+messageLine = '쉬는시간 입니다. 스페이스바를 누르면 이어서 시작합니다.';
 if isstring(messageLine)
     messageLine = char(messageLine);
 end
@@ -629,12 +687,6 @@ switch direction
     otherwise
         error('Unknown motion direction: %s', motionParams.direction);
 end
-end
-
-function xyPix = convertCentersToPixels(xDeg, yDeg, dp)
-xyPix = [xDeg; yDeg] * dp.ppd;
-xyPix(1, :) = xyPix(1, :) + dp.cx;
-xyPix(2, :) = xyPix(2, :) + dp.cy;
 end
 
 function aperture = updateApertureEdges(aperture)
