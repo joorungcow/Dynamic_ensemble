@@ -56,7 +56,7 @@ end
 % Initialize Keyboards
 if ~config.useKbQueueCheck
     [kb.keyIsDown, kb.secs, kb.keyCode] = KbCheck(-1);
-    RestrictKeysForKbCheck([kb.escKey, kb.leftKey, kb.rightKey]);
+    RestrictKeysForKbCheck([kb.escKey, kb.leftKey, kb.rightKey, kb.spaceKey]);
 else
     kb.devices = PsychHID('Devices');
     kb.keysOfInterest=zeros(1,256);
