@@ -40,10 +40,10 @@ dotParams.targetMeanDeg     = 1.0;         % 목표 평균 지름(시야각)
 dotParams.meanJitterDeg     = 0.05;        % 목표 평균에 추가되는 랜덤 지터 범위(시야각)
 dotParams.minSizeDeg        = 0.4;         % 생성 가능한 점의 최소 지름(시야각)
 dotParams.maxSizeDeg        = 1.8;         % 생성 가능한 점의 최대 지름(시야각)
-dotParams.gToleranceDeg     = 0.01;       % 점 생성 시 허용 오차(시야각)
+dotParams.gToleranceDeg     = 0.001;       % 점 생성 시 허용 오차(시야각)
 dotParams.jitterStdRatio    = 0.15;        % 지터 표준편차에 대한 비율
 dotParams.perceptualExponent = 0.76;       % 지각적 크기 변환에 사용하는 지수 값
-dotParams.meanDiffLevels    = [0.06 0.12 0.3 6]; % 두 자극 간 평균 차이 수준(시야각) 0.06 0.12 0.18 0.24 0.30 0.36
+dotParams.meanDiffLevels    = [0.06 0.12 0.36]; % 두 자극 간 평균 차이 수준(시야각) 0.06 0.12 0.18 0.24 0.30 0.36
 dotParams.safetyMarginDeg   = 0.05;        % 점이 경계에 겹치지 않도록 확보하는 안전 여유(시야각)
 
 ratioAssignments = {
@@ -70,8 +70,8 @@ stimCombos = {'MM','SM','MS','SS'}; % 움직임/정지 조합(M: 움직임, S: �
 
 gridConfig.rows = 6;
 gridConfig.cols = 6;
-gridConfig.windowWidthDeg = 6 * 2.65;       % 자극 제시 창의 가로 크기(시야각)
-gridConfig.windowHeightDeg = 6 * 2.65;      % 자극 제시 창의 세로 크기(시야각)
+gridConfig.windowWidthDeg = 6 * 2;       % 자극 제시 창의 가로 크기(시야각)
+gridConfig.windowHeightDeg = 6 * 2;      % 자극 제시 창의 세로 크기(시야각)
 gridConfig.maxJitterDeg = 0.12;             % 셀 중심 기준 최대 지터(시야각)
 gridConfig.maxAttemptsPerCell = 50;
 gridConfig.safetyMarginDeg = dotParams.safetyMarginDeg;
