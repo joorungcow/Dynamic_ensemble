@@ -2,7 +2,7 @@ AssertOpenGL;
 KbName('UnifyKeyNames');
 
 kb = struct();
-kb.useKbQueueCheck = 0;
+kb.useKbQueueCheck = 1;
 kb = init_keyboard(kb);
 
 %% Display settings
@@ -19,7 +19,7 @@ dp.responseInstructions = {
     double('왼쪽 방향키: T1 평균이 더 큽니다');
     double('오른쪽 방향키: T2 평균이 더 큽니다')
 };
-dp.skipChecks = 1;
+dp.skipChecks = 0;
 
 saveFileName = sprintf('results_test9_%s.mat', datestr(now, 'yyyymmdd_HHMMSS'));
 
@@ -38,7 +38,7 @@ try
     dotParams.gToleranceDeg     = 0.001;       % 점 생성 시 허용 오차(시야각)
     dotParams.jitterStdRatio    = 0.15;        % 지터 표준편차에 대한 비율
     dotParams.perceptualExponent = 0.76;       % 지각적 크기 변환에 사용하는 지수 값
-    dotParams.meanDiffLevels    = [0.06 0.12 0.18 0.24 0.30 0.36]; % 두 자극 간 평균 차이 수준(시야각)
+    dotParams.meanDiffLevels    = [0.06 0.12 0.18 0.24 0.30 0.36]; % 두 자극 간 평균 차이 수준(시야각) 0.06 0.12 0.18 0.24 0.30 0.36
     dotParams.safetyMarginDeg   = 0.05;        % 점이 경계에 겹치지 않도록 확보하는 안전 여유(시야각)
 
     ratioAssignments = {
@@ -57,7 +57,7 @@ try
     %% Timing configuration (ms)
     timingParams.fixationMs     = 300;  % 응시점 제시 시간(ms)
     timingParams.stimDurationMs = 500;  % 각 자극 제시 시간(ms)
-    timingParams.isiDurationMs  = 1000; % 자극 사이 공백 지속 시간(ms)
+    timingParams.isiDurationMs  = 200; % 자극 사이 공백 지속 시간(ms)
     timingParams.postTrialMs    = 1000; % 반응 대기 및 안내 문구 표시 시간(ms)
 
     comboRepeats = 1;                   % 자극 조합 반복 횟수
@@ -65,8 +65,8 @@ try
 
     gridConfig.rows = 6;
     gridConfig.cols = 6;
-    gridConfig.windowWidthDeg = 6 * 2.65;       % 자극 제시 창의 가로 크기(시야각)
-    gridConfig.windowHeightDeg = 6 * 2.65;      % 자극 제시 창의 세로 크기(시야각)
+    gridConfig.windowWidthDeg = 6 * 2;       % 자극 제시 창의 가로 크기(시야각)
+    gridConfig.windowHeightDeg = 6 * 2;      % 자극 제시 창의 세로 크기(시야각)
     gridConfig.maxJitterDeg = 0.12;             % 셀 중심 기준 최대 지터(시야각)
     gridConfig.maxAttemptsPerCell = 50;
     gridConfig.safetyMarginDeg = dotParams.safetyMarginDeg;
