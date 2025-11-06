@@ -1,10 +1,3 @@
-function test13()
-%TEST13 Main experiment script using pre-generated sampling plans.
-%
-%   test13() prompts for a subject identifier, loads the corresponding
-%   sampling plan from ./sampling/<subID>_sampling.mat, and runs the
-%   experiment while logging perceptual-scale compliant statistics.
-
 AssertOpenGL;
 KbName('UnifyKeyNames');
 
@@ -24,70 +17,63 @@ if ~isfield(planData, 'plan')
 end
 plan = planData.plan;
 
-kb = struct();
-kb.useKbQueueCheck = 0;
-kb = init_keyboard(kb);
+if ~isfield(plan, 'display') || ~isstruct(plan.display)
+    error('Plan file %s is missing display settings. Regenerate using sampling.m.', planFile);
+end
+dp = plan.display;
+if ~isfield(dp, 'screenNum') || isempty(dp.screenNum)
+    dp.screenNum = max(Screen('Screens'));
+end
 
-%% Display settings
-dp.screenNum = max(Screen('Screens'));
+if ~isfield(plan, 'dotParams') || ~isstruct(plan.dotParams)
+    error('Plan file %s is missing dot configuration. Regenerate using sampling.m.', planFile);
+end
+params = plan.dotParams;
+if ~isfield(params, 'perceptualExponent') || isempty(params.perceptualExponent)
+    params.perceptualExponent = plan.meta.expo;
+end
+if ~isfield(params, 'meanDiffLevels') || isempty(params.meanDiffLevels)
+    params.meanDiffLevels = plan.meta.diffLevels;
+end
 
-dp.dist   = 55;
-dp.width  = 60;
-dp.bkColor   = [0.5 0.5 0.5];
-dp.textColor = [1 1 1];
-dp.textFont  = 'Malgun Gothic';
-dp.textSize  = 24;
-dp.textLineSpacingMultiplier = 3;
-dp.responseInstructions = {
-    double('왼쪽 방향키: T1 평균이 더 큽니다');
-    double('오른쪽 방향키: T2 평균이 더 큽니다')
-};
-dp.skipChecks = 1;
+if ~isfield(plan, 'motionParams') || ~isstruct(plan.motionParams)
+    error('Plan file %s is missing motion configuration. Regenerate using sampling.m.', planFile);
+end
+motionParams = plan.motionParams;
 
-%% Dot configuration
-params.smallSizeDeg = 0.7;
-params.largeSizeDeg = 1.3;
-params.minSizeDeg   = 0.4;
-params.maxSizeDeg   = 1.8;
-params.meanJitterDeg = 0.05;
-params.meanDiffTolerance = 0.005;
-params.gToleranceDeg = 0.001;
-params.jitterStdRatio = 0.15;
-params.perceptualExponent = plan.meta.expo;
-params.meanDiffLevels = plan.meta.diffLevels;
-params.safetyMarginDeg = 0.05;
-params.equalFreqCounts = [4 4];
-params.useHalfRange = false;
+if ~isfield(plan, 'timingParams') || ~isstruct(plan.timingParams)
+    error('Plan file %s is missing timing configuration. Regenerate using sampling.m.', planFile);
+end
+timingParams = plan.timingParams;
 
-%% Motion configuration
-motionParams.direction = 'up';
-motionParams.speedDegPerSec = 1.5;
-
-%% Timing configuration (ms)
-timingParams.fixationMs = 300;
-timingParams.stimDurationMs = 500;
-timingParams.isiDurationMs = 1000;
-timingParams.postTrialMs = 1000;
-
-gridConfig.rows = 6;
-gridConfig.cols = 6;
-gridConfig.windowWidthDeg = 12;
-gridConfig.windowHeightDeg = 12;
-gridConfig.maxJitterDeg = 0.12;
-gridConfig.maxAttemptsPerCell = 50;
-gridConfig.safetyMarginDeg = params.safetyMarginDeg;
-gridConfig.outerPaddingDeg = params.maxSizeDeg/2 + params.safetyMarginDeg;
+if ~isfield(plan, 'gridConfig') || ~isstruct(plan.gridConfig)
+    error('Plan file %s is missing grid configuration. Regenerate using sampling.m.', planFile);
+end
+gridConfig = plan.gridConfig;
 
 gridLayout = buildCentralGridLayout(gridConfig);
 
-breakDurationSec = 20;
+if isfield(timingParams, 'breakDurationSec') && ~isempty(timingParams.breakDurationSec)
+    breakDurationSec = timingParams.breakDurationSec;
+else
+    breakDurationSec = 20;
+end
+
+kb = struct();
+kb.useKbQueueCheck = 0;
+kb = init_keyboard(kb);
 
 results = struct();
 results.meta = plan.meta;
 results.meta.subID = subID;
 results.meta.generatedAt = datestr(now, 'yyyymmdd_HHMMSS');
+results.meta.display = plan.display;
+results.meta.dotParams = plan.dotParams;
+results.meta.motionParams = plan.motionParams;
+results.meta.timingParams = plan.timingParams;
+results.meta.gridConfig = plan.gridConfig;
 
-saveFileName = sprintf('results_test13');
+saveFileName = sprintf('results_%s_%s.mat', subID, datestr(now, 'yyyymmdd'));
 
 try
     dp = OpenWindow(dp);
@@ -192,7 +178,6 @@ catch ME
     RestrictKeysForKbCheck([]);
     rethrow(ME);
 end
-end
 
 %% Helper functions ------------------------------------------------------
 function resultStruct = initTrialResultStruct()
@@ -247,7 +232,7 @@ function abort = presentFixation(dp, durationMs, kb)
 abort = false;
 numFrames = max(1, round((durationMs/1000) / dp.ifi));
 firstFrame = true;
-for frameIdx = 1:numFrames 
+for frameIdx = 1:numFrames %#ok<NASGU>
     Screen('FillRect', dp.wPtr, dp.bkColor);
     make_fixation(dp);
     if firstFrame
@@ -719,7 +704,7 @@ end
 numFrames = max(1, round((durationMs/1000) / dp.ifi));
 vbl = Screen('Flip', dp.wPtr);
 
-for frameIdx = 1:numFrames 
+for frameIdx = 1:numFrames %#ok<NASGU>
     Screen('FillRect', dp.wPtr, dp.bkColor);
     vbl = Screen('Flip', dp.wPtr, vbl + 0.5 * dp.ifi);
     if shouldAbort(kb)
