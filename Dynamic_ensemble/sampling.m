@@ -37,6 +37,68 @@ plan.meta.diffLevels = diffLevels;
 plan.meta.freqRatioLabels = {freqRatios.label};
 plan.meta.equalFreqLabel = '4:4';
 
+%% Display settings saved with the plan
+displayParams = struct();
+displayParams.screenNum = [];
+displayParams.dist = 55;
+displayParams.width = 60;
+displayParams.bkColor = [0.5 0.5 0.5];
+displayParams.textColor = [1 1 1];
+displayParams.textFont = 'Malgun Gothic';
+displayParams.textSize = 24;
+displayParams.textLineSpacingMultiplier = 3;
+displayParams.responseInstructions = {
+    '왼쪽 방향키: T1 평균이 더 큽니다';
+    '오른쪽 방향키: T2 평균이 더 큽니다'
+};
+displayParams.skipChecks = 1;
+
+%% Dot configuration saved with the plan
+dotParams = struct();
+dotParams.smallSizeDeg = 0.7;
+dotParams.largeSizeDeg = 1.3;
+dotParams.minSizeDeg = 0.4;
+dotParams.maxSizeDeg = 1.8;
+dotParams.meanJitterDeg = 0.05;
+dotParams.meanDiffTolerance = 0.005;
+dotParams.gToleranceDeg = 0.001;
+dotParams.jitterStdRatio = 0.15;
+dotParams.perceptualExponent = expo;
+dotParams.meanDiffLevels = diffLevels;
+dotParams.safetyMarginDeg = 0.05;
+dotParams.equalFreqCounts = [4 4];
+dotParams.useHalfRange = false;
+
+%% Motion configuration saved with the plan
+motionParams = struct();
+motionParams.direction = 'up';
+motionParams.speedDegPerSec = 1.5;
+
+%% Timing configuration saved with the plan (milliseconds unless noted)
+timingParams = struct();
+timingParams.fixationMs = 300;
+timingParams.stimDurationMs = 500;
+timingParams.isiDurationMs = 1000;
+timingParams.postTrialMs = 1000;
+timingParams.breakDurationSec = 20;
+
+%% Grid layout configuration saved with the plan
+gridConfig = struct();
+gridConfig.rows = 6;
+gridConfig.cols = 6;
+gridConfig.windowWidthDeg = 12;
+gridConfig.windowHeightDeg = 12;
+gridConfig.maxJitterDeg = 0.12;
+gridConfig.maxAttemptsPerCell = 50;
+gridConfig.safetyMarginDeg = dotParams.safetyMarginDeg;
+gridConfig.outerPaddingDeg = dotParams.maxSizeDeg/2 + dotParams.safetyMarginDeg;
+
+plan.display = displayParams;
+plan.dotParams = dotParams;
+plan.motionParams = motionParams;
+plan.timingParams = timingParams;
+plan.gridConfig = gridConfig;
+
 signVals = [+1, -1];
 methodPairs = {'FREQ_vs_EQ','EQ_vs_FREQ'};
 
