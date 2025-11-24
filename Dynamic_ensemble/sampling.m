@@ -152,7 +152,7 @@ idx = 1;
 for r = 1:numel(freqRatios)
     for d = 1:numel(diffLevels)
         for rep = 1:repeatCount
-            baseCombos(idx).freqRatio = freqRatioLabels{r}; %#ok<AGROW>
+            baseCombos(idx).freqRatio = freqRatioLabels{r};
             baseCombos(idx).diffLevel = diffLevels(d);
             idx = idx + 1;
         end
@@ -374,7 +374,7 @@ function projected = adjustMeanPSWithinBounds(psValues, targetMeanPS, minPS, max
 numVals = numel(psValues);
 maxIter = 50;
 projected = psValues;
-for iter = 1:maxIter %#ok<NASGU>
+for iter = 1:maxIter 
     meanDiff = targetMeanPS - mean(projected);
     if abs(meanDiff) <= tolerance
         break;
