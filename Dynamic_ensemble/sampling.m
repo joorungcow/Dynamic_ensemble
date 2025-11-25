@@ -10,7 +10,7 @@ function sampling()
 %   The script can be converted to a function handle for batch
 %   generation, but the default usage is to run it interactively.
 
-repeatCount = 1; % Set the repeat count per combination here (edit as needed).
+repeatCount = 30; % Set the repeat count per combination here (edit as needed).
 
 subID = strtrim(input('Enter subject ID (e.g., sub01): ', 's'));
 if isempty(subID)
@@ -151,7 +151,7 @@ idx = 1;
 for r = 1:numel(freqRatios)
     for d = 1:numel(diffLevels)
         for rep = 1:repeatCount
-            baseCombos(idx).freqRatio = freqRatioLabels{r}; %#ok<AGROW>
+            baseCombos(idx).freqRatio = freqRatioLabels{r}; 
             baseCombos(idx).diffLevel = diffLevels(d);
             idx = idx + 1;
         end
@@ -373,7 +373,7 @@ function projected = adjustMeanPSWithinBounds(psValues, targetMeanPS, minPS, max
 numVals = numel(psValues);
 maxIter = 50;
 projected = psValues;
-for iter = 1:maxIter %#ok<NASGU>
+for iter = 1:maxIter
     meanDiff = targetMeanPS - mean(projected);
     if abs(meanDiff) <= tolerance
         break;
