@@ -16,7 +16,6 @@ subID = strtrim(input('Enter subject ID (e.g., sub01): ', 's'));
 if isempty(subID)
     error('Subject ID must be provided.');
 end
-
 blockOrderStr = upper(strtrim(input('Enter block order (SMR, SRM, MSR, MRS, RSM, or RMS): ', 's')));
 blockLetters = parseBlockOrder(blockOrderStr);
 
@@ -152,7 +151,7 @@ idx = 1;
 for r = 1:numel(freqRatios)
     for d = 1:numel(diffLevels)
         for rep = 1:repeatCount
-            baseCombos(idx).freqRatio = freqRatioLabels{r};
+            baseCombos(idx).freqRatio = freqRatioLabels{r}; %#ok<AGROW>
             baseCombos(idx).diffLevel = diffLevels(d);
             idx = idx + 1;
         end
@@ -374,7 +373,7 @@ function projected = adjustMeanPSWithinBounds(psValues, targetMeanPS, minPS, max
 numVals = numel(psValues);
 maxIter = 50;
 projected = psValues;
-for iter = 1:maxIter 
+for iter = 1:maxIter %#ok<NASGU>
     meanDiff = targetMeanPS - mean(projected);
     if abs(meanDiff) <= tolerance
         break;
