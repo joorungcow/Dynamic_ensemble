@@ -26,194 +26,229 @@ if ~isfield(dp, 'screenNum') || isempty(dp.screenNum)
 end
 
 if ~isfield(plan, 'dotParams') || ~isstruct(plan.dotParams)
-%% Timing configuration saved with the plan (milliseconds unless noted)
-timingParams = struct();
-timingParams.fixationMs = 300;
-timingParams.stimDurationMs = 500;
-timingParams.isiDurationMs = 1000;
-timingParams.postTrialMs = 1000;
-timingParams.breakDurationSec = 20;
+    error('Plan file %s is missing dot configuration. Regenerate using sampling.m.', planFile);
+end
+params = plan.dotParams;
+if ~isfield(params, 'perceptualExponent') || isempty(params.perceptualExponent)
+    params.perceptualExponent = plan.meta.expo;
+end
+if ~isfield(params, 'meanDiffLevels') || isempty(params.meanDiffLevels)
+    params.meanDiffLevels = plan.meta.diffLevels;
+end
 
-%% Grid layout configuration saved with the plan
-gridConfig = struct();
-gridConfig.rows = 6;
-gridConfig.cols = 6;
-gridConfig.windowWidthDeg = 12;
-gridConfig.windowHeightDeg = 12;
-gridConfig.maxJitterDeg = 0.12;
-gridConfig.maxAttemptsPerCell = 50;
-gridConfig.safetyMarginDeg = dotParams.safetyMarginDeg;
-gridConfig.outerPaddingDeg = dotParams.maxSizeDeg/2 + dotParams.safetyMarginDeg;
+if ~isfield(plan, 'motionParams') || ~isstruct(plan.motionParams)
+    error('Plan file %s is missing motion configuration. Regenerate using sampling.m.', planFile);
+end
+motionParams = plan.motionParams;
 
-plan.display = displayParams;
-plan.dotParams = dotParams;
-plan.motionParams = motionParams;
-plan.timingParams = timingParams;
-plan.gridConfig = gridConfig;
+if ~isfield(plan, 'timingParams') || ~isstruct(plan.timingParams)
+    error('Plan file %s is missing timing configuration. Regenerate using sampling.m.', planFile);
+end
+timingParams = plan.timingParams;
+
+if ~isfield(plan, 'gridConfig') || ~isstruct(plan.gridConfig)
+    error('Plan file %s is missing grid configuration. Regenerate using sampling.m.', planFile);
+end
+gridConfig = plan.gridConfig;
 
 gridLayout = buildCentralGridLayout(gridConfig);
-plan.gridLayout = gridLayout;
 
-signVals = [+1, -1];
-methodPairs = {'FREQ_vs_EQ','EQ_vs_FREQ'};
+if isfield(timingParams, 'breakDurationSec') && ~isempty(timingParams.breakDurationSec)
+    breakDurationSec = timingParams.breakDurationSec;
+else
+    breakDurationSec = 20;
+end
 
-plan.blocks = repmat(struct('label', '', 'trials', []), 1, numel(blockLetters));
+kb = struct();
+kb.useKbQueueCheck = 0;
+kb = init_keyboard(kb);
 
-totalTrials = 0;
+results = struct();
+results.meta = plan.meta;
+results.meta.subID = subID;
+results.meta.generatedAt = datestr(now, 'yyyymmdd_HHMMSS');
+results.meta.display = plan.display;
+results.meta.dotParams = plan.dotParams;
+results.meta.motionParams = plan.motionParams;
+results.meta.timingParams = plan.timingParams;
+results.meta.gridConfig = plan.gridConfig;
 
-for b = 1:numel(blockLetters)
-    letter = blockLetters{b};
-    switch letter
-        case 'M'
-            blockLabel = 'MM';
-            comboLabels = {'MM'};
-        case 'S'
-            blockLabel = 'SS';
-            comboLabels = {'SS'};
-        case 'R'
-            blockLabel = 'R';
-            comboLabels = {'SM','MS'};
-        otherwise
-            error('Unknown block letter %s.', letter);
+saveFileName = sprintf('results_%s_%s.mat', subID, datestr(now, 'yyyymmdd'));
+
+try
+    dp = OpenWindow(dp);
+    HideCursor;
+    ListenChar(2);
+
+    epsDeg = 1 / dp.ppd;
+    fprintf('Estimated pixel pitch: %.4f°/pixel.\n', epsDeg);
+    if params.gToleranceDeg < 0.5 * epsDeg
+        fprintf(['[경고] gTolerance가 디스플레이 상도(%.4f°)보다 매우 작습니다. ' ...
+            '계산상 문제는 없으나 물리적으로 구분이 어려울 수 있습니다.\n'], epsDeg);
     end
 
-    trials = buildBlockTrials(blockLabel, comboLabels, diffLevels, freqRatios, signVals, methodPairs, repeatCount, dotParams, gridLayout, gridConfig);
-    plan.blocks(b).label = blockLabel;
-    plan.blocks(b).trials = trials;
-    totalTrials = totalTrials + numel(trials);
-end
+    Screen('FillRect', dp.wPtr, dp.bkColor);
+    Screen('Flip', dp.wPtr);
 
-plan.meta.N = totalTrials;
+    totalTrials = plan.meta.N;
+    results.trials(totalTrials, 1) = initTrialResultStruct();
 
-if ~exist('sampling', 'dir')
-    mkdir('sampling');
-end
+    trialIdx = 1;
+    abortExperiment = false;
 
-saveFile = fullfile('sampling', sprintf('%s_sampling.mat', subID));
-save(saveFile, 'plan');
-fprintf('Plan saved to %s\n', saveFile);
-end
+    for b = 1:numel(plan.blocks)
+        block = plan.blocks(b);
+        showBlockIntro(dp, sprintf('블록 %d / %d (%s)', b, numel(plan.blocks), block.label));
 
-function trials = buildBlockTrials(blockLabel, comboLabels, diffLevels, freqRatios, signVals, methodPairs, repeatCount, dotParams, gridLayout, gridConfig)
-% Build the trial list for a single block according to balance rules and repeat count.
+        for t = 1:numel(block.trials)
+            trialSpec = block.trials(t);
+            if abortExperiment
+                break;
+            end
 
-freqRatioLabels = {freqRatios.label};
+            [stimulusPair, stimInfo] = buildStimulusFromPlan(trialSpec, params, gridLayout, gridConfig);
 
-baseCombos = struct('freqRatio', {}, 'diffLevel', {});
-idx = 1;
-for r = 1:numel(freqRatios)
-    for d = 1:numel(diffLevels)
-        for rep = 1:repeatCount
-            baseCombos(idx).freqRatio = freqRatioLabels{r}; 
-            baseCombos(idx).diffLevel = diffLevels(d);
-            idx = idx + 1;
+            if timingParams.fixationMs > 0
+                abortExperiment = presentFixation(dp, timingParams.fixationMs, kb);
+                if abortExperiment
+                    break;
+                end
+            end
+
+            abortExperiment = presentStimulus(dp, stimulusPair.t1, trialSpec.isMoving(1), motionParams, timingParams.stimDurationMs, kb);
+            if abortExperiment
+                break;
+            end
+
+            abortExperiment = presentBlank(dp, timingParams.isiDurationMs, kb);
+            if abortExperiment
+                break;
+            end
+
+            abortExperiment = presentStimulus(dp, stimulusPair.t2, trialSpec.isMoving(2), motionParams, timingParams.stimDurationMs, kb);
+            if abortExperiment
+                break;
+            end
+
+            response = collectResponse(dp, kb, timingParams.postTrialMs);
+            if response.wasAborted
+                abortExperiment = true;
+                break;
+            end
+
+            trialResult = populateTrialResult(trialIdx, trialSpec, stimInfo, response, params);
+            results.trials(trialIdx) = trialResult;
+            trialIdx = trialIdx + 1;
+        end
+
+        if abortExperiment
+            break;
+        end
+
+        if b < numel(plan.blocks)
+            abortExperiment = presentBreakScreen(dp, kb, breakDurationSec);
+            if abortExperiment
+                break;
+            end
         end
     end
+
+    completed = trialIdx - 1;
+    results.trials = results.trials(1:completed);
+
+    presentBlank(dp, 0, kb);
+
+    Screen('CloseAll');
+    ListenChar(0);
+    ShowCursor;
+    if kb.useKbQueueCheck
+        KbQueueRelease;
+    end
+    RestrictKeysForKbCheck([]);
+
+    save(saveFileName, 'results');
+    fprintf('Results saved to %s\n', saveFileName);
+catch ME
+    Screen('CloseAll');
+    ListenChar(0);
+    ShowCursor;
+    if exist('kb','var') && isfield(kb,'useKbQueueCheck') && kb.useKbQueueCheck
+        KbQueueRelease;
+    end
+    RestrictKeysForKbCheck([]);
+    rethrow(ME);
 end
 
-numTrials = numel(baseCombos);
-if strcmp(blockLabel, 'R') && mod(numTrials, 2) ~= 0
-    error('Repeat count must yield an even number of trials for the mixed block.');
+%% Helper functions ------------------------------------------------------
+function resultStruct = initTrialResultStruct()
+resultStruct = struct( ...
+    'trialIndex', [], ...
+    'comboLabel', '', ...
+    'methodPair', '', ...
+    'freqRatio', '', ...
+    'equalFreq', true, ...
+    'diffLevelTarget', [], ...
+    'signS', [], ...
+    'largerSide', '', ...
+    'isMoving', [], ...
+    't1MeanPS', [], ...
+    't2MeanPS', [], ...
+    'psDiffObserved', [], ...
+    'diffLevelObservedPS', [], ...
+    't1MeanDeg', [], ...
+    't2MeanDeg', [], ...
+    'expoUsed', [], ...
+    'jitterPS_applied', [], ...
+    'responseKey', '', ...
+    'responseChoice', '', ...
+    'responseRtMs', NaN, ...
+    'didRespond', false, ...
+    'correct', NaN, ...
+    'targetPSMeans', [], ...
+    'methodPairLabel', '', ...
+    'comboMotion', '', ...
+    'psTargetsAfterJitter', [] );
 end
 
-signSeq = repmat(signVals, 1, ceil(numTrials / numel(signVals)));
-signSeq = signSeq(1:numTrials);
-signSeq = signSeq(randperm(numTrials));
+function showBlockIntro(dp, labelText)
+if nargin < 2 || isempty(labelText)
+    labelText = '';
+end
+Screen('FillRect', dp.wPtr, dp.bkColor);
+if isfield(dp, 'textFont') && ~isempty(dp.textFont)
+    Screen('TextFont', dp.wPtr, dp.textFont);
+end
+if isfield(dp, 'textSize') && ~isempty(dp.textSize)
+    Screen('TextSize', dp.wPtr, dp.textSize);
+end
+if ~isempty(labelText)
+    Screen('DrawText', dp.wPtr, double(labelText), dp.cx - 200, dp.cy, dp.textColor);
+end
+Screen('Flip', dp.wPtr);
+WaitSecs(1.0);
+end
 
-methodSeq = repmat(methodPairs, 1, ceil(numTrials / numel(methodPairs)));
-methodSeq = methodSeq(1:numTrials);
-methodSeq = methodSeq(randperm(numTrials));
-
-comboPool = baseCombos(randperm(numTrials));
-
-switch blockLabel
-    case {'MM','SS'}
-        comboSeq = repmat(comboLabels, 1, ceil(numTrials / numel(comboLabels)));
-        comboSeq = comboSeq(1:numTrials);
-        comboSeq = comboSeq(randperm(numTrials));
-
-        firstInfo = augmentComboInfo(comboPool(1), signSeq(1), methodSeq{1});
-        firstTrial = finalizeTrialStimulus(composeTrialStruct(comboSeq{1}, firstInfo), dotParams, gridLayout, gridConfig);
-        trials = repmat(firstTrial, 1, numTrials);
-
-        for t = 1:numTrials
-            if t == 1
-                continue;
-            end
-            comboInfo = augmentComboInfo(comboPool(t), signSeq(t), methodSeq{t});
-            baseTrial = composeTrialStruct(comboSeq{t}, comboInfo);
-            trials(t) = finalizeTrialStimulus(baseTrial, dotParams, gridLayout, gridConfig);
-        end
-    case 'R'
-        labels = [repmat({'SM'}, 1, numTrials/2), repmat({'MS'}, 1, numTrials/2)];
-        labels = labels(randperm(numTrials));
-
-        firstInfo = augmentComboInfo(comboPool(1), signSeq(1), methodSeq{1});
-        firstTrial = finalizeTrialStimulus(composeTrialStruct(labels{1}, firstInfo), dotParams, gridLayout, gridConfig);
-        trials = repmat(firstTrial, 1, numTrials);
-
-        for t = 1:numTrials
-            if t == 1
-                continue;
-            end
-            comboInfo = augmentComboInfo(comboPool(t), signSeq(t), methodSeq{t});
-            baseTrial = composeTrialStruct(labels{t}, comboInfo);
-            trials(t) = finalizeTrialStimulus(baseTrial, dotParams, gridLayout, gridConfig);
-        end
-    otherwise
-        error('Unsupported block label %s', blockLabel);
+function abort = presentFixation(dp, durationMs, kb)
+abort = false;
+numFrames = max(1, round((durationMs/1000) / dp.ifi));
+firstFrame = true;
+for frameIdx = 1:numFrames %#ok<NASGU>
+    Screen('FillRect', dp.wPtr, dp.bkColor);
+    make_fixation(dp);
+    if firstFrame
+        vbl = Screen('Flip', dp.wPtr);
+        firstFrame = false;
+    else
+        vbl = Screen('Flip', dp.wPtr, vbl + 0.5 * dp.ifi);
+    end
+    if shouldAbort(kb)
+        abort = true;
+        break;
+    end
 end
 end
 
-function trial = composeTrialStruct(comboLabel, comboInfo)
-trial = struct();
-trial.comboLabel = comboLabel;
-trial.motionCombo = comboLabel;
-trial.methodPair = comboInfo.methodPair;
-trial.freqRatio = comboInfo.freqRatio;
-trial.equalFreq = true;
-trial.diffLevel = comboInfo.diffLevel;
-trial.signS = comboInfo.signS;
-trial.isMoving = [comboLabel(1) == 'M', comboLabel(2) == 'M'];
-trial.numDots = 8; % fixed (6:2 vs 4:4 etc.)
-end
-
-function comboInfo = augmentComboInfo(comboInfo, signVal, methodPair)
-comboInfo.signS = signVal;
-comboInfo.methodPair = methodPair;
-end
-
-function letters = parseBlockOrder(orderStr)
-validOrders = {'SMR','SRM','MSR','MRS','RSM','RMS'};
-
-if numel(orderStr) ~= 3
-    error('Block order must contain exactly three letters.');
-end
-
-if ~ismember(orderStr, validOrders)
-    error('Block order must be one of: %s.', char(strjoin(validOrders, ', ')));
-end
-
-letters = cellfun(@(c) string(c), cellstr(orderStr.'));
-letters = cellfun(@char, letters, 'UniformOutput', false);
-end
-
-function trial = finalizeTrialStimulus(trial, params, layout, gridConfig)
-[stimPair, stimInfo] = buildStimulusForTrial(trial, params, layout, gridConfig);
-trial.t1Stimulus = stimPair.t1;
-trial.t2Stimulus = stimPair.t2;
-trial.stimInfo = stimInfo;
-trial.t1MeanPS = stimInfo.t1MeanPS;
-trial.t2MeanPS = stimInfo.t2MeanPS;
-trial.t1MeanDeg = stimInfo.t1MeanDeg;
-trial.t2MeanDeg = stimInfo.t2MeanDeg;
-trial.jitterPS_applied = stimInfo.jitterPS;
-trial.targetPSMeans = stimInfo.targetPSMeans;
-trial.psTargetsAfterJitter = stimInfo.psTargetsAfterJitter;
-trial.largerSide = stimInfo.largerSide;
-end
-
-function [stimPair, info] = buildStimulusForTrial(trialSpec, params, layout, gridConfig)
+function [stimPair, info] = buildStimulusFromPlan(trialSpec, params, layout, gridConfig)
 expo = params.perceptualExponent;
 freqCounts = getFrequencyRatioCounts(trialSpec.freqRatio);
 eqCounts = params.equalFreqCounts;
@@ -239,6 +274,7 @@ mu1TargetJittered = mu1Target;
 mu2TargetJittered = mu2Target;
 
 [t1SizesDeg, t1MeanPS] = synthesizeSetFromBase(baseT1, mu1Target, params);
+% Recompute target for T2 based on realized T1 mean to maintain ratio
 ratioTarget = 1 + trialSpec.signS * trialSpec.diffLevel;
 mu2Target = t1MeanPS * ratioTarget;
 [t2SizesDeg, t2MeanPS] = synthesizeSetFromBase(baseT2, mu2Target, params);
@@ -326,7 +362,7 @@ function projected = adjustMeanPSWithinBounds(psValues, targetMeanPS, minPS, max
 numVals = numel(psValues);
 maxIter = 50;
 projected = psValues;
-for iter = 1:maxIter 
+for iter = 1:maxIter
     meanDiff = targetMeanPS - mean(projected);
     if abs(meanDiff) <= tolerance
         break;
@@ -454,6 +490,87 @@ if any(stimSet.verticalSpanDeg <= 0) || any(stimSet.horizontalSpanDeg <= 0)
 end
 end
 
+function trialResult = populateTrialResult(trialIndex, trialSpec, stimInfo, response, params)
+trialResult = initTrialResultStruct();
+trialResult.trialIndex = trialIndex;
+trialResult.comboLabel = trialSpec.comboLabel;
+trialResult.comboMotion = trialSpec.motionCombo;
+trialResult.methodPair = trialSpec.methodPair;
+trialResult.methodPairLabel = trialSpec.methodPair;
+trialResult.freqRatio = trialSpec.freqRatio;
+trialResult.equalFreq = trialSpec.equalFreq;
+trialResult.diffLevelTarget = trialSpec.diffLevel;
+trialResult.signS = trialSpec.signS;
+trialResult.largerSide = stimInfo.largerSide;
+trialResult.isMoving = trialSpec.isMoving;
+trialResult.t1MeanPS = stimInfo.t1MeanPS;
+trialResult.t2MeanPS = stimInfo.t2MeanPS;
+trialResult.psDiffObserved = stimInfo.psDiffObserved;
+trialResult.diffLevelObservedPS = stimInfo.diffLevelObservedPS;
+trialResult.t1MeanDeg = stimInfo.t1MeanDeg;
+trialResult.t2MeanDeg = stimInfo.t2MeanDeg;
+trialResult.expoUsed = params.perceptualExponent;
+trialResult.jitterPS_applied = stimInfo.jitterPS;
+trialResult.targetPSMeans = stimInfo.targetPSMeans;
+trialResult.psTargetsAfterJitter = stimInfo.psTargetsAfterJitter;
+
+if response.didRespond
+    trialResult.didRespond = true;
+    trialResult.responseKey = response.keyName;
+    trialResult.responseRtMs = response.rt * 1000;
+    if strcmpi(response.keyName, 'LeftArrow')
+        trialResult.responseChoice = 'T1';
+    elseif strcmpi(response.keyName, 'RightArrow')
+        trialResult.responseChoice = 'T2';
+    else
+        trialResult.responseChoice = '';
+    end
+else
+    trialResult.didRespond = false;
+    trialResult.responseKey = '';
+    trialResult.responseChoice = '';
+    trialResult.responseRtMs = NaN;
+end
+
+if trialResult.didRespond
+    if strcmp(trialResult.responseChoice, 'T1')
+        trialResult.correct = stimInfo.t1MeanPS > stimInfo.t2MeanPS;
+    elseif strcmp(trialResult.responseChoice, 'T2')
+        trialResult.correct = stimInfo.t2MeanPS > stimInfo.t1MeanPS;
+    else
+        trialResult.correct = NaN;
+    end
+else
+    trialResult.correct = NaN;
+end
+end
+
+function layout = buildCentralGridLayout(gridConfig)
+inner.centerDeg = [0, 0];
+inner.widthDeg = gridConfig.windowWidthDeg;
+inner.heightDeg = gridConfig.windowHeightDeg;
+inner = updateApertureEdges(inner);
+
+outer = inner;
+outer.widthDeg = inner.widthDeg + 2 * gridConfig.outerPaddingDeg;
+outer.heightDeg = inner.heightDeg + 2 * gridConfig.outerPaddingDeg;
+outer = updateApertureEdges(outer);
+
+cellWidthDeg = inner.widthDeg / gridConfig.cols;
+cellHeightDeg = inner.heightDeg / gridConfig.rows;
+
+colCenters = inner.leftDeg + (0.5:1:gridConfig.cols-0.5) * cellWidthDeg;
+rowCenters = inner.topDeg + (0.5:1:gridConfig.rows-0.5) * cellHeightDeg;
+[gridX, gridY] = meshgrid(colCenters, rowCenters);
+
+layout.innerAperture = inner;
+layout.outerAperture = outer;
+layout.gridX = gridX(:);
+layout.gridY = gridY(:);
+layout.cellWidthDeg = cellWidthDeg;
+layout.cellHeightDeg = cellHeightDeg;
+end
+
 function [xPosDeg, yPosDeg] = placeDotsOnGrid(dotSizesDeg, layout, gridConfig)
 numDots = numel(dotSizesDeg);
 occupiedCells = false(numel(layout.gridX), 1);
@@ -532,30 +649,294 @@ for dotIdx = 1:numDots
 end
 end
 
-function layout = buildCentralGridLayout(gridConfig)
-inner.centerDeg = [0, 0];
-inner.widthDeg = gridConfig.windowWidthDeg;
-inner.heightDeg = gridConfig.windowHeightDeg;
-inner = updateApertureEdges(inner);
+function abort = presentStimulus(dp, stim, isMoving, motionParams, stimDurationMs, kb)
+abort = false;
+numFrames = max(1, round((stimDurationMs/1000) / dp.ifi));
 
-outer = inner;
-outer.widthDeg = inner.widthDeg + 2 * gridConfig.outerPaddingDeg;
-outer.heightDeg = inner.heightDeg + 2 * gridConfig.outerPaddingDeg;
-outer = updateApertureEdges(outer);
+sizePix = stim.dotSizeDeg * dp.ppd;
 
-cellWidthDeg = inner.widthDeg / gridConfig.cols;
-cellHeightDeg = inner.heightDeg / gridConfig.rows;
+if isMoving
+    currentXY = [stim.xPosDeg; stim.yPosDeg];
+else
+    staticXY = [stim.xPosDeg; stim.yPosDeg] * dp.ppd;
+    staticXY(1, :) = staticXY(1, :) + dp.cx;
+    staticXY(2, :) = staticXY(2, :) + dp.cy;
+end
 
-colCenters = inner.leftDeg + (0.5:1:gridConfig.cols-0.5) * cellWidthDeg;
-rowCenters = inner.topDeg + (0.5:1:gridConfig.rows-0.5) * cellHeightDeg;
-[gridX, gridY] = meshgrid(colCenters, rowCenters);
+Screen('FillRect', dp.wPtr, dp.bkColor);
+vbl = Screen('Flip', dp.wPtr);
 
-layout.innerAperture = inner;
-layout.outerAperture = outer;
-layout.gridX = gridX(:);
-layout.gridY = gridY(:);
-layout.cellWidthDeg = cellWidthDeg;
-layout.cellHeightDeg = cellHeightDeg;
+for frameIdx = 1:numFrames
+    if isMoving
+        if frameIdx > 1
+            [stim.xPosDeg, stim.yPosDeg] = updatePositions(stim.xPosDeg, stim.yPosDeg, motionParams, stim, dp);
+            currentXY = [stim.xPosDeg; stim.yPosDeg];
+        end
+        xyPix = currentXY * dp.ppd;
+        xyPix(1, :) = xyPix(1, :) + dp.cx;
+        xyPix(2, :) = xyPix(2, :) + dp.cy;
+    else
+        xyPix = staticXY;
+    end
+
+    Screen('FillRect', dp.wPtr, dp.bkColor);
+    Screen('DrawDots', dp.wPtr, xyPix, sizePix, [1 1 1], [0 0], 2);
+
+    vbl = Screen('Flip', dp.wPtr, vbl + 0.5 * dp.ifi);
+
+    if shouldAbort(kb)
+        abort = true;
+        break;
+    end
+end
+end
+
+function abort = presentBlank(dp, durationMs, kb)
+abort = false;
+Screen('FillRect', dp.wPtr, dp.bkColor);
+
+if durationMs <= 0
+    Screen('Flip', dp.wPtr);
+    abort = shouldAbort(kb);
+    return;
+end
+
+numFrames = max(1, round((durationMs/1000) / dp.ifi));
+vbl = Screen('Flip', dp.wPtr);
+
+for frameIdx = 1:numFrames %#ok<NASGU>
+    Screen('FillRect', dp.wPtr, dp.bkColor);
+    vbl = Screen('Flip', dp.wPtr, vbl + 0.5 * dp.ifi);
+    if shouldAbort(kb)
+        abort = true;
+        break;
+    end
+end
+end
+
+function abort = presentBreakScreen(dp, kb, waitSeconds)
+if nargin < 3 || isempty(waitSeconds)
+    waitSeconds = 20;
+end
+
+abort = false;
+
+if kb.useKbQueueCheck
+    KbQueueFlush;
+else
+    KbReleaseWait;
+end
+
+if isfield(dp, 'textFont') && ~isempty(dp.textFont)
+    Screen('TextFont', dp.wPtr, dp.textFont);
+end
+if isfield(dp, 'textSize') && ~isempty(dp.textSize)
+    Screen('TextSize', dp.wPtr, dp.textSize);
+end
+
+messageLine = '쉬는시간 입니다. 스페이스바를 누르면 이어서 시작합니다.';
+messageLine = double(messageLine);
+
+allowResponseTime = GetSecs + waitSeconds;
+firstFrame = true;
+vbl = 0;
+
+while true
+    Screen('FillRect', dp.wPtr, dp.bkColor);
+    bounds = Screen('TextBounds', dp.wPtr, messageLine);
+    textX = dp.cx - RectWidth(bounds) / 2;
+    textY = dp.cy - RectHeight(bounds) / 2;
+    Screen('DrawText', dp.wPtr, messageLine, textX, textY, dp.textColor);
+
+    if firstFrame
+        vbl = Screen('Flip', dp.wPtr);
+        firstFrame = false;
+    else
+        vbl = Screen('Flip', dp.wPtr, vbl + 0.5 * dp.ifi);
+    end
+
+    if kb.useKbQueueCheck
+        [pressed, firstPress] = KbQueueCheck;
+        if pressed
+            if any(firstPress(kb.escKey))
+                abort = true;
+                break;
+            elseif GetSecs >= allowResponseTime && firstPress(kb.spaceKey) > 0
+                break;
+            end
+        end
+    else
+        [keyIsDown, ~, keyCode] = KbCheck(-1);
+        if keyIsDown
+            if keyCode(kb.escKey)
+                abort = true;
+                break;
+            elseif GetSecs >= allowResponseTime && keyCode(kb.spaceKey)
+                break;
+            end
+        end
+    end
+end
+
+if ~abort
+    if kb.useKbQueueCheck
+        KbQueueFlush;
+    else
+        KbReleaseWait;
+    end
+end
+
+if ~firstFrame
+    Screen('FillRect', dp.wPtr, dp.bkColor);
+    Screen('Flip', dp.wPtr, vbl + 0.5 * dp.ifi);
+end
+end
+
+function response = collectResponse(dp, kb, durationMs)
+response = struct('wasAborted', false, 'didRespond', false, 'keyName', '', 'keyCode', [], 'rt', NaN);
+
+instructionLines = dp.responseInstructions;
+if isempty(instructionLines)
+    instructionLines = {
+        '왼쪽 방향키: T1 평균이 더 큽니다';
+        '오른쪽 방향키: T2 평균이 더 큽니다'
+    };
+end
+
+for lineIdx = 1:numel(instructionLines)
+    currentLine = instructionLines{lineIdx};
+    if isnumeric(currentLine)
+        instructionLines{lineIdx} = currentLine;
+    else
+        if isstring(currentLine)
+            currentLine = char(currentLine);
+        elseif iscell(currentLine)
+            currentLine = char(currentLine{:});
+        end
+        if ischar(currentLine)
+            instructionLines{lineIdx} = double(currentLine);
+        else
+            instructionLines{lineIdx} = double(string(currentLine));
+        end
+    end
+end
+
+startTime = GetSecs;
+deadline = startTime + durationMs / 1000;
+
+if kb.useKbQueueCheck
+    KbQueueFlush;
+else
+    KbReleaseWait;
+end
+
+if isfield(dp, 'textFont') && ~isempty(dp.textFont)
+    Screen('TextFont', dp.wPtr, dp.textFont);
+end
+if isfield(dp, 'textSize') && ~isempty(dp.textSize)
+    Screen('TextSize', dp.wPtr, dp.textSize);
+end
+
+textSize = Screen('TextSize', dp.wPtr);
+if textSize <= 0
+    textSize = 24;
+    Screen('TextSize', dp.wPtr, textSize);
+end
+
+if isfield(dp, 'textLineSpacingMultiplier') && ~isempty(dp.textLineSpacingMultiplier)
+    lineSpacingMultiplier = dp.textLineSpacingMultiplier;
+else
+    lineSpacingMultiplier = 1.2;
+end
+
+lineSpacingPx = max(1, round(lineSpacingMultiplier * textSize));
+baseY = dp.cy - 1.5 * dp.ppd;
+
+firstFrame = true;
+vbl = 0;
+
+while GetSecs < deadline && ~response.wasAborted && ~response.didRespond
+    Screen('FillRect', dp.wPtr, dp.bkColor);
+
+    for lineIdx = 1:numel(instructionLines)
+        lineY = baseY + (lineIdx - 1) * lineSpacingPx;
+        bounds = Screen('TextBounds', dp.wPtr, instructionLines{lineIdx});
+        textX = dp.cx - RectWidth(bounds) / 2;
+        Screen('DrawText', dp.wPtr, instructionLines{lineIdx}, textX, lineY, dp.textColor);
+    end
+
+    if firstFrame
+        vbl = Screen('Flip', dp.wPtr);
+        firstFrame = false;
+    else
+        vbl = Screen('Flip', dp.wPtr, vbl + 0.5 * dp.ifi);
+    end
+
+    if kb.useKbQueueCheck
+        [pressed, firstPress] = KbQueueCheck;
+        if pressed
+            if any(firstPress(kb.escKey))
+                response.wasAborted = true;
+                break;
+            elseif firstPress(kb.leftKey) > 0
+                response.didRespond = true;
+                response.keyCode = kb.leftKey;
+                response.keyName = 'LeftArrow';
+                response.rt = firstPress(kb.leftKey) - startTime;
+            elseif firstPress(kb.rightKey) > 0
+                response.didRespond = true;
+                response.keyCode = kb.rightKey;
+                response.keyName = 'RightArrow';
+                response.rt = firstPress(kb.rightKey) - startTime;
+            end
+        end
+    else
+        [keyIsDown, keyTime, keyCode] = KbCheck(-1);
+        if keyIsDown
+            if keyCode(kb.escKey)
+                response.wasAborted = true;
+                break;
+            elseif keyCode(kb.leftKey)
+                response.didRespond = true;
+                response.keyCode = kb.leftKey;
+                response.keyName = 'LeftArrow';
+                response.rt = keyTime - startTime;
+            elseif keyCode(kb.rightKey)
+                response.didRespond = true;
+                response.keyCode = kb.rightKey;
+                response.keyName = 'RightArrow';
+                response.rt = keyTime - startTime;
+            end
+        end
+    end
+end
+
+if ~firstFrame
+    Screen('FillRect', dp.wPtr, dp.bkColor);
+    Screen('Flip', dp.wPtr, vbl + 0.5 * dp.ifi);
+end
+end
+
+function [xPosDeg, yPosDeg] = updatePositions(xPosDeg, yPosDeg, motionParams, stim, dp)
+stepDeg = motionParams.speedDegPerSec / dp.frameRate;
+
+direction = lower(motionParams.direction);
+switch direction
+    case 'up'
+        yPosDeg = yPosDeg - stepDeg;
+        yPosDeg = stim.topEdgesDeg + mod(yPosDeg - stim.topEdgesDeg, stim.verticalSpanDeg);
+    case 'down'
+        yPosDeg = yPosDeg + stepDeg;
+        yPosDeg = stim.topEdgesDeg + mod(yPosDeg - stim.topEdgesDeg, stim.verticalSpanDeg);
+    case 'left'
+        xPosDeg = xPosDeg - stepDeg;
+        xPosDeg = stim.leftEdgesDeg + mod(xPosDeg - stim.leftEdgesDeg, stim.horizontalSpanDeg);
+    case 'right'
+        xPosDeg = xPosDeg + stepDeg;
+        xPosDeg = stim.leftEdgesDeg + mod(xPosDeg - stim.leftEdgesDeg, stim.horizontalSpanDeg);
+    otherwise
+        error('Unknown motion direction: %s', motionParams.direction);
+end
 end
 
 function aperture = updateApertureEdges(aperture)
@@ -586,4 +967,9 @@ end
 
 function m = meanPS(xDeg, expo)
 m = mean(xDeg .^ expo);
+end
+
+function abort = shouldAbort(kb)
+[keyIsDown, ~, keyCode] = KbCheck(-1);
+abort = keyIsDown && any(keyCode(kb.escKey));
 end
