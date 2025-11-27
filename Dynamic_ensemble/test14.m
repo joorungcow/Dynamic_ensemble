@@ -9,11 +9,10 @@ end
 gender = upper(strtrim(input('성별을 입력하세요 (M/F): ', 's')));
 ageStr = strtrim(input('만 나이를 숫자로 입력하세요 (예: 25): ', 's'));
 age    = str2double(ageStr);
-
 hand   = upper(strtrim(input('주로 사용하는 손을 입력하세요 (R/L): ', 's')));
 colorVision = upper(strtrim(input('시력 이상 또는 색약/색맹 여부가 있으면 Y, 없으면 N: ', 's')));
 
-planFile = fullfile('sampling', sprintf('%s_sampling2.mat', subID));
+planFile = fullfile('sampling', sprintf('%s_sampling.mat', subID));
 if ~exist(planFile, 'file')
     error('Plan file %s not found. Run sampling2.m first.', planFile);
 end
@@ -58,7 +57,12 @@ if ~isfield(plan, 'gridConfig') || ~isstruct(plan.gridConfig)
 end
 gridConfig = plan.gridConfig;
 
-gridLayout = buildCentralGridLayout(gridConfig);
+% gridLayout: use from plan if present, else rebuild
+if isfield(plan, 'gridLayout') && ~isempty(plan.gridLayout)
+    gridLayout = plan.gridLayout;
+else
+    gridLayout = buildCentralGridLayout(gridConfig);
+end
 
 if isfield(timingParams, 'breakDurationSec') && ~isempty(timingParams.breakDurationSec)
     breakDurationSec = timingParams.breakDurationSec;
@@ -66,26 +70,28 @@ else
     breakDurationSec = 20;
 end
 
-kb = struct();
-kb.useKbQueueCheck = 0;
-kb = init_keyboard(kb);
+%% ----------------- Keyboard & results struct -----------------
+kbConfig = struct();
+kbConfig.useKbQueueCheck = 0;
+kb = init_keyboard(kbConfig);
 
 results = struct();
 results.meta = plan.meta;
-results.meta.subID = subID;
+results.meta.subID       = subID;
 results.meta.generatedAt = datestr(now, 'yyyymmdd_HHMMSS');
 results.meta.gender      = gender;
 results.meta.age         = age;
 results.meta.hand        = hand;
 results.meta.colorVision = colorVision;
-results.meta.display = plan.display;
-results.meta.dotParams = plan.dotParams;
+results.meta.display      = plan.display;
+results.meta.dotParams    = plan.dotParams;
 results.meta.motionParams = plan.motionParams;
 results.meta.timingParams = plan.timingParams;
-results.meta.gridConfig = plan.gridConfig;
+results.meta.gridConfig   = plan.gridConfig;
 
-saveFileName = sprintf('results_%s_%s.mat', subID, datestr(now, 'yyyymmdd'));
+saveFileName = sprintf('results_%s_%s.mat', subID, datestr(now, 'yyyymmdd_HHMMSS'));
 
+%% ----------------- Main try/catch -----------------
 try
     dp = OpenWindow(dp);
     HideCursor;
@@ -101,20 +107,32 @@ try
     Screen('FillRect', dp.wPtr, dp.bkColor);
     Screen('Flip', dp.wPtr);
 
-    mode = showStartScreen(dp, kb);
+    % --------- Start screen: choose practice vs main ---------
+    mode = showStartScreen(dp, kb); % 'main', 'practice', 'abort'
     if strcmp(mode, 'abort')
         error('Experiment aborted at start screen.');
     end
 
+    % --------- Practice blocks (optional) ---------
     if strcmp(mode, 'practice')
-        results.practiceTrials = runPracticeBlocks(dp, kb, plan, params, gridLayout, gridConfig, motionParams, timingParams);
-        showPracticeEndScreen(dp, kb);
+        if isfield(plan, 'practiceBlocks') && ~isempty(plan.practiceBlocks)
+            fprintf('Running practice blocks...\n');
+            results.practiceTrials = runPracticeBlocks(dp, kb, plan, params, gridLayout, gridConfig, motionParams, timingParams);
+            showPracticeEndScreen(dp, kb);
+        else
+            fprintf('No practiceBlocks found in plan. Skipping practice.\n');
+        end
     end
 
-    totalTrials = plan.meta.N;
+    % --------- Main experiment ---------
+    if isfield(plan.meta, 'NMain') && ~isempty(plan.meta.NMain)
+        totalTrials = plan.meta.NMain;
+    else
+        totalTrials = plan.meta.N;
+    end
     results.trials(totalTrials, 1) = initTrialResultStruct();
 
-    trialIdx = 1;
+    trialIdx        = 1;
     abortExperiment = false;
 
     for b = 1:numel(plan.blocks)
@@ -130,26 +148,20 @@ try
             [stimulusPair, stimInfo] = buildStimulusFromPlan(trialSpec, params, gridLayout, gridConfig);
 
             if timingParams.fixationMs > 0
-                abortExperiment = presentFixation(dp, timingParams.fixationMs, kb);
+                abortExperiment = presentFixation(dp, timingParams.fixationMs, kb); % default white
                 if abortExperiment
                     break;
                 end
             end
 
             abortExperiment = presentStimulus(dp, stimulusPair.t1, trialSpec.isMoving(1), motionParams, timingParams.stimDurationMs, kb);
-            if abortExperiment
-                break;
-            end
+            if abortExperiment, break; end
 
             abortExperiment = presentBlank(dp, timingParams.isiDurationMs, kb);
-            if abortExperiment
-                break;
-            end
+            if abortExperiment, break; end
 
             abortExperiment = presentStimulus(dp, stimulusPair.t2, trialSpec.isMoving(2), motionParams, timingParams.stimDurationMs, kb);
-            if abortExperiment
-                break;
-            end
+            if abortExperiment, break; end
 
             response = collectResponse(dp, kb, timingParams.postTrialMs);
             if response.wasAborted
@@ -158,6 +170,7 @@ try
             end
 
             trialResult = populateTrialResult(trialIdx, trialSpec, stimInfo, response, params);
+            trialResult.isPractice = false;
             results.trials(trialIdx) = trialResult;
             trialIdx = trialIdx + 1;
         end
@@ -189,6 +202,7 @@ try
 
     save(saveFileName, 'results');
     fprintf('Results saved to %s\n', saveFileName);
+
 catch ME
     Screen('CloseAll');
     ListenChar(0);
@@ -197,10 +211,19 @@ catch ME
         KbQueueRelease;
     end
     RestrictKeysForKbCheck([]);
+    fprintf('Error occurred: %s\n', ME.message);
+    crashFile = sprintf('results_%s_%s_crash.mat', subID, datestr(now, 'yyyymmdd_HHMMSS'));
+    if exist('results','var')
+        save(crashFile, 'results');
+        fprintf('Partial results saved to %s\n', crashFile);
+    end
     rethrow(ME);
 end
 
-%% Helper functions ------------------------------------------------------
+%% ========================================================================
+%% =================== Helper functions ===================================
+%% ========================================================================
+
 function resultStruct = initTrialResultStruct()
 resultStruct = struct( ...
     'trialIndex', [], ...
@@ -228,7 +251,8 @@ resultStruct = struct( ...
     'targetPSMeans', [], ...
     'methodPairLabel', '', ...
     'comboMotion', '', ...
-    'psTargetsAfterJitter', [] );
+    'psTargetsAfterJitter', [], ...
+    'isPractice', false );
 end
 
 function showBlockIntro(dp, labelText)
@@ -250,6 +274,8 @@ WaitSecs(1.0);
 end
 
 function mode = showStartScreen(dp, kb)
+% mode: 'main', 'practice', 'abort'
+
 if kb.useKbQueueCheck
     KbQueueFlush;
 else
@@ -266,8 +292,12 @@ lines = {
 };
 
 Screen('FillRect', dp.wPtr, dp.bkColor);
-if isfield(dp, 'textFont'), Screen('TextFont', dp.wPtr, dp.textFont); end
-if isfield(dp, 'textSize'), Screen('TextSize', dp.wPtr, dp.textSize); end
+if isfield(dp, 'textFont') && ~isempty(dp.textFont)
+    Screen('TextFont', dp.wPtr, dp.textFont);
+end
+if isfield(dp, 'textSize') && ~isempty(dp.textSize)
+    Screen('TextSize', dp.wPtr, dp.textSize);
+end
 
 firstFrame = true;
 vbl = 0;
@@ -276,9 +306,9 @@ while true
     Screen('FillRect', dp.wPtr, dp.bkColor);
     y = dp.cy - numel(lines)*15;
     for i = 1:numel(lines)
-        bounds = Screen('TextBounds', dp.wPtr, lines{i});
+        bounds = Screen('TextBounds', dp.wPtr, double(lines{i}));
         x = dp.cx - RectWidth(bounds)/2;
-        Screen('DrawText', dp.wPtr, lines{i}, x, y, dp.textColor);
+        Screen('DrawText', dp.wPtr, double(lines{i}), x, y, dp.textColor);
         y = y + 30;
     end
 
@@ -307,16 +337,49 @@ while true
 end
 end
 
+function abort = presentFixation(dp, durationMs, kb, fixColor)
+% Colored fixation cross; default white if fixColor omitted.
+if nargin < 4 || isempty(fixColor)
+    fixColor = [1 1 1];
+end
+
+abort = false;
+numFrames = max(1, round((durationMs/1000) / dp.ifi));
+firstFrame = true;
+vbl = 0;
+
+for frameIdx = 1:numFrames %#ok<NASGU>
+    Screen('FillRect', dp.wPtr, dp.bkColor);
+    % draw fixation here (color version)
+    fixSize   = 20;
+    lineWidth = 2;
+    Screen('DrawLine', dp.wPtr, fixColor, dp.cx-fixSize/2, dp.cy, dp.cx+fixSize/2, dp.cy, lineWidth);
+    Screen('DrawLine', dp.wPtr, fixColor, dp.cx, dp.cy-fixSize/2, dp.cx, dp.cy+fixSize/2, lineWidth);
+
+    if firstFrame
+        vbl = Screen('Flip', dp.wPtr);
+        firstFrame = false;
+    else
+        vbl = Screen('Flip', dp.wPtr, vbl + 0.5 * dp.ifi);
+    end
+    if shouldAbort(kb)
+        abort = true;
+        break;
+    end
+end
+end
+
 function practiceResults = runPracticeBlocks(dp, kb, plan, params, gridLayout, gridConfig, motionParams, timingParams)
+
 practiceBlocks = plan.practiceBlocks;
 nPracticeTotal = sum(arrayfun(@(b) numel(b.trials), practiceBlocks));
 
 practiceResults(nPracticeTotal,1) = initTrialResultStruct();
 
-trialIdx = 1;
+trialIdx        = 1;
 abortExperiment = false;
 
-fixColorNext = [1 1 1];
+fixColorNext = [1 1 1]; % first fixation: white
 
 for b = 1:numel(practiceBlocks)
     block = practiceBlocks(b);
@@ -328,6 +391,7 @@ for b = 1:numel(practiceBlocks)
         trialSpec = block.trials(t);
         [stimulusPair, stimInfo] = buildStimulusFromPlan(trialSpec, params, gridLayout, gridConfig);
 
+        % feedback fixation (color based on previous trial correctness)
         if timingParams.fixationMs > 0
             abortExperiment = presentFixation(dp, timingParams.fixationMs, kb, fixColorNext);
             if abortExperiment, break; end
@@ -350,17 +414,17 @@ for b = 1:numel(practiceBlocks)
 
         tr = populateTrialResult(trialIdx, trialSpec, stimInfo, response, params);
         tr.isPractice = true;
-
         practiceResults(trialIdx) = tr;
 
+        % Decide next fixation color by correctness
         if tr.didRespond && ~isnan(tr.correct)
             if tr.correct == 1
-                fixColorNext = [0 1 0];
+                fixColorNext = [0 1 0]; % green
             else
-                fixColorNext = [1 0 0];
+                fixColorNext = [1 0 0]; % red
             end
         else
-            fixColorNext = [1 1 1];
+            fixColorNext = [1 1 1];     % white for miss/NaN
         end
 
         trialIdx = trialIdx + 1;
@@ -376,14 +440,18 @@ function showPracticeEndScreen(dp, kb)
 msg = '연습 시행이 끝났습니다. 스페이스바를 누르면 본 실험을 시작합니다.';
 
 Screen('FillRect', dp.wPtr, dp.bkColor);
-Screen('TextSize', dp.wPtr, dp.textSize);
-Screen('TextFont', dp.wPtr, dp.textFont);
+if isfield(dp, 'textFont') && ~isempty(dp.textFont)
+    Screen('TextFont', dp.wPtr, dp.textFont);
+end
+if isfield(dp, 'textSize') && ~isempty(dp.textSize)
+    Screen('TextSize', dp.wPtr, dp.textSize);
+end
 
-bounds = Screen('TextBounds', dp.wPtr, msg);
+bounds = Screen('TextBounds', dp.wPtr, double(msg));
 x = dp.cx - RectWidth(bounds)/2;
 y = dp.cy;
 
-Screen('DrawText', dp.wPtr, msg, x, y, dp.textColor);
+Screen('DrawText', dp.wPtr, double(msg), x, y, dp.textColor);
 Screen('Flip', dp.wPtr);
 
 while true
@@ -397,37 +465,14 @@ while true
 end
 end
 
-function abort = presentFixation(dp, durationMs, kb, fixColor)
-if nargin < 4 || isempty(fixColor)
-    fixColor = [1 1 1];
-end
-
-abort = false;
-numFrames = max(1, round((durationMs/1000) / dp.ifi));
-firstFrame = true;
-for frameIdx = 1:numFrames %#ok<NASGU>
-    Screen('FillRect', dp.wPtr, dp.bkColor);
-    make_fixation(dp, [], fixColor, []);
-    if firstFrame
-        vbl = Screen('Flip', dp.wPtr);
-        firstFrame = false;
-    else
-        vbl = Screen('Flip', dp.wPtr, vbl + 0.5 * dp.ifi);
-    end
-    if shouldAbort(kb)
-        abort = true;
-        break;
-    end
-end
-end
-
 function [stimPair, info] = buildStimulusFromPlan(trialSpec, params, layout, gridConfig)
+% 그대로 test13.m의 buildStimulusFromPlan 복사
 expo = params.perceptualExponent;
 freqCounts = getFrequencyRatioCounts(trialSpec.freqRatio);
-eqCounts = params.equalFreqCounts;
+eqCounts   = params.equalFreqCounts;
 
 freqBase = make_frequency_set(freqCounts, params);
-eqBase = make_equalFreq_set(eqCounts, params);
+eqBase   = make_equalFreq_set(eqCounts, params);
 
 if strcmp(trialSpec.methodPair, 'FREQ_vs_EQ')
     baseT1 = freqBase;
@@ -438,8 +483,8 @@ else
 end
 
 ratioTarget = 1 + trialSpec.signS * trialSpec.diffLevel;
-mu1Target = meanPS(baseT1, expo);
-mu2Target = mu1Target * ratioTarget;
+mu1Target   = meanPS(baseT1, expo);
+mu2Target   = mu1Target * ratioTarget;
 
 jitterRangePS = computeJitterRangePS(mu1Target, mu2Target, params);
 [mu1Target, mu2Target] = jitterMeanPairPS(mu1Target, mu2Target, jitterRangePS, trialSpec.diffLevel, trialSpec.signS);
@@ -447,9 +492,8 @@ mu1TargetJittered = mu1Target;
 mu2TargetJittered = mu2Target;
 
 [t1SizesDeg, t1MeanPS] = synthesizeSetFromBase(baseT1, mu1Target, params);
-% Recompute target for T2 based on realized T1 mean to maintain ratio
 ratioTarget = 1 + trialSpec.signS * trialSpec.diffLevel;
-mu2Target = t1MeanPS * ratioTarget;
+mu2Target   = t1MeanPS * ratioTarget;
 [t2SizesDeg, t2MeanPS] = synthesizeSetFromBase(baseT2, mu2Target, params);
 
 stimPair = struct();
@@ -463,17 +507,39 @@ info.t1MeanDeg = mean(t1SizesDeg);
 info.t2MeanDeg = mean(t2SizesDeg);
 info.psDiffObserved = (t2MeanPS / t1MeanPS) - 1;
 info.diffLevelObservedPS = info.psDiffObserved * 100;
-info.expoUsed = expo;
-info.jitterPS = jitterRangePS;
-info.targetPSMeans = [mu1TargetJittered, mu2TargetJittered];
+info.expoUsed  = expo;
+info.jitterPS  = jitterRangePS;
+info.targetPSMeans        = [mu1TargetJittered, mu2TargetJittered];
 info.psTargetsAfterJitter = [mu1TargetJittered, mu2Target];
-info.largerSide = ternary(trialSpec.signS >= 0, 'T2', 'T1');
+info.largerSide           = ternary(trialSpec.signS >= 0, 'T2', 'T1');
 end
 
 function [sizesDeg, finalMeanPS] = synthesizeSetFromBase(baseSizesDeg, targetMeanPS, params)
-expo = params.perceptualExponent;
+% test13.m의 synthesizeSetFromBase 복사
+expo   = params.perceptualExponent;
 basePS = toPS(baseSizesDeg, expo);
+scale  = targetMeanPS / mean(basePS);
+basePS = basePS * scale;
+
+minPS = toPS(params.minSizeDeg, expo);
+maxPS = toPS(params.maxSizeDeg, expo);
+tolerancePS = computePSTolerance(params.gToleranceDeg, targetMeanPS, expo);
+if tolerancePS <= 0
+    tolerancePS = 1e-5;
+end
+
+maxAttempts = 1000;
+noiseStdPS  = params.jitterStdRatio * targetMeanPS;
+bestPS      = basePS;
+bestDiff    = abs(mean(basePS) - targetMeanPS);
+
 for attempt = 1:maxAttempts
+    if attempt == round(maxAttempts * 0.5)
+        noiseStdPS = noiseStdPS * 0.5;
+    elseif attempt == round(maxAttempts * 0.75)
+        noiseStdPS = noiseStdPS * 0.25;
+    end
+
     noise = noiseStdPS .* randn(size(basePS));
     noise = noise - mean(noise);
 
@@ -483,13 +549,13 @@ for attempt = 1:maxAttempts
 
     candidateDeg = fromPS(candidatePS, expo);
     candidateDeg = min(max(candidateDeg, params.minSizeDeg), params.maxSizeDeg);
-    candidatePS = toPS(candidateDeg, expo);
-    candidatePS = adjustMeanPSWithinBounds(candidatePS, targetMeanPS, minPS, maxPS, tolerancePS);
+    candidatePS  = toPS(candidateDeg, expo);
+    candidatePS  = adjustMeanPSWithinBounds(candidatePS, targetMeanPS, minPS, maxPS, tolerancePS);
 
     currentDiff = abs(mean(candidatePS) - targetMeanPS);
     if currentDiff < bestDiff
         bestDiff = currentDiff;
-        bestPS = candidatePS;
+        bestPS   = candidatePS;
     end
 
     if currentDiff <= tolerancePS
@@ -498,10 +564,10 @@ for attempt = 1:maxAttempts
     end
 end
 
-finalPS = bestPS;
-sizesDeg = fromPS(finalPS, expo);
-sizesDeg = min(max(sizesDeg, params.minSizeDeg), params.maxSizeDeg);
-finalPS = toPS(sizesDeg, expo);
+finalPS   = bestPS;
+sizesDeg  = fromPS(finalPS, expo);
+sizesDeg  = min(max(sizesDeg, params.minSizeDeg), params.maxSizeDeg);
+finalPS   = toPS(sizesDeg, expo);
 finalMeanPS = mean(finalPS);
 end
 
@@ -511,8 +577,8 @@ tolerancePS = abs(toPS(targetDeg + tolDeg, expo) - targetMeanPS);
 end
 
 function projected = adjustMeanPSWithinBounds(psValues, targetMeanPS, minPS, maxPS, tolerance)
-numVals = numel(psValues);
-maxIter = 50;
+numVals   = numel(psValues);
+maxIter   = 50;
 projected = psValues;
 for iter = 1:maxIter
     meanDiff = targetMeanPS - mean(projected);
@@ -523,41 +589,112 @@ for iter = 1:maxIter
     totalDiff = meanDiff * numVals;
     if totalDiff > 0
         adjustable = find(projected < maxPS - eps);
-        if isempty(adjustable)
-            break;
-        end
-        slack = maxPS - projected(adjustable);
+        if isempty(adjustable), break; end
+        slack      = maxPS - projected(adjustable);
         totalSlack = sum(slack);
-        if totalSlack <= 0
-            break;
-        end
-        factor = min(1, totalDiff / totalSlack);
+        if totalSlack <= 0, break; end
+        factor     = min(1, totalDiff / totalSlack);
         increments = factor .* slack;
         projected(adjustable) = projected(adjustable) + increments;
     else
         adjustable = find(projected > minPS + eps);
-        if isempty(adjustable)
-            break;
-        end
-        slack = projected(adjustable) - minPS;
+        if isempty(adjustable), break; end
+        slack      = projected(adjustable) - minPS;
+        totalSlack = sum(slack);
+        if totalSlack <= 0, break; end
+        factor     = min(1, -totalDiff / totalSlack);
+        decrements = factor .* slack;
+        projected(adjustable) = projected(adjustable) - decrements;
+    end
+    projected = min(max(projected, minPS), maxPS);
+end
+
+if abs(mean(projected) - targetMeanPS) > tolerance
+    offset   = targetMeanPS - mean(projected);
+    projected = projected + offset;
+    projected = min(max(projected, minPS), maxPS);
+end
+end
+
+function jitterPS = computeJitterRangePS(mu1PS, mu2PS, params)
+expo    = params.perceptualExponent;
+meanDeg = mean([fromPS(mu1PS, expo), fromPS(mu2PS, expo)]);
+meanDeg = max(meanDeg, params.minSizeDeg);
+jitterPS = abs(toPS(meanDeg + params.meanJitterDeg, expo) - toPS(meanDeg, expo));
+end
+
+function [mu1Adj, mu2Adj] = jitterMeanPairPS(mu1PS, mu2PS, jitterRangePS, diffLevel, signS)
+if jitterRangePS <= 0
+    mu1Adj = mu1PS;
+    mu2Adj = mu2PS;
+    return;
+end
+
+jitter1 = (rand * 2 - 1) * jitterRangePS;
+jitter2 = (rand * 2 - 1) * jitterRangePS;
+mu1Adj  = max(eps, mu1PS + jitter1);
+mu2Adj  = max(eps, mu2PS + jitter2);
+
+ratioTarget  = 1 + signS * diffLevel;
+projectedMu2 = mu1Adj * ratioTarget;
+projectedMu1 = mu2Adj / ratioTarget;
+if abs(projectedMu2 - mu2Adj) <= abs(projectedMu1 - mu1Adj)
+    mu2Adj = max(eps, projectedMu2);
+else
+    mu1Adj = max(eps, projectedMu1);
+end
+end
+
+function sizes = make_frequency_set(counts, params)
+sizes = [repmat(params.smallSizeDeg, 1, counts(1)), ...
+         repmat(params.largeSizeDeg, 1, counts(2))];
+sizes = sizes(randperm(numel(sizes)));
+end
+
+function sizes = make_equalFreq_set(counts, params)
+base  = [repmat(params.smallSizeDeg, 1, counts(1)), ...
+         repmat(params.largeSizeDeg, 1, counts(2))];
+sizes = base(randperm(numel(base)));
+end
+
+function counts = getFrequencyRatioCounts(label)
+switch label
+    case '6:2'
+        counts = [6 2];
+    case '5:3'
+        counts = [5 3];
+    case '3:5'
+        counts = [3 5];
+    case '2:6'
+        counts = [2 6];
+    otherwise
+        error('Unknown frequency ratio label: %s', label);
+end
+end
+
+function stimSet = createStimulusFromSizes(dotSizesDeg, layout, gridConfig)
+stimSet.dotSizeDeg = dotSizesDeg;
+[stimSet.xPosDeg, stimSet.yPosDeg] = placeDotsOnGrid(dotSizesDeg, layout, gridConfig);
+
 stimSet.outerAperture = layout.outerAperture;
 stimSet.innerAperture = layout.innerAperture;
-stimSet.halfSizeDeg = stimSet.dotSizeDeg / 2;
+stimSet.halfSizeDeg   = stimSet.dotSizeDeg / 2;
 
-stimSet.topEdgesDeg = stimSet.outerAperture.topDeg + stimSet.halfSizeDeg;
+stimSet.topEdgesDeg    = stimSet.outerAperture.topDeg    + stimSet.halfSizeDeg;
 stimSet.bottomEdgesDeg = stimSet.outerAperture.bottomDeg - stimSet.halfSizeDeg;
-stimSet.leftEdgesDeg = stimSet.outerAperture.leftDeg + stimSet.halfSizeDeg;
-stimSet.rightEdgesDeg = stimSet.outerAperture.rightDeg - stimSet.halfSizeDeg;
+stimSet.leftEdgesDeg   = stimSet.outerAperture.leftDeg   + stimSet.halfSizeDeg;
+stimSet.rightEdgesDeg  = stimSet.outerAperture.rightDeg  - stimSet.halfSizeDeg;
 
-stimSet.verticalSpanDeg = stimSet.bottomEdgesDeg - stimSet.topEdgesDeg;
-stimSet.horizontalSpanDeg = stimSet.rightEdgesDeg - stimSet.leftEdgesDeg;
+stimSet.verticalSpanDeg   = stimSet.bottomEdgesDeg   - stimSet.topEdgesDeg;
+stimSet.horizontalSpanDeg = stimSet.rightEdgesDeg    - stimSet.leftEdgesDeg;
 
-stimSet.innerTopEdgesDeg = stimSet.innerAperture.topDeg + stimSet.halfSizeDeg;
+stimSet.innerTopEdgesDeg    = stimSet.innerAperture.topDeg    + stimSet.halfSizeDeg;
 stimSet.innerBottomEdgesDeg = stimSet.innerAperture.bottomDeg - stimSet.halfSizeDeg;
-stimSet.innerLeftEdgesDeg = stimSet.innerAperture.leftDeg + stimSet.halfSizeDeg;
-stimSet.innerRightEdgesDeg = stimSet.innerAperture.rightDeg - stimSet.halfSizeDeg;
+stimSet.innerLeftEdgesDeg   = stimSet.innerAperture.leftDeg   + stimSet.halfSizeDeg;
+stimSet.innerRightEdgesDeg  = stimSet.innerAperture.rightDeg  - stimSet.halfSizeDeg;
 
-if any(stimSet.innerBottomEdgesDeg <= stimSet.innerTopEdgesDeg) || any(stimSet.innerRightEdgesDeg <= stimSet.innerLeftEdgesDeg)
+if any(stimSet.innerBottomEdgesDeg <= stimSet.innerTopEdgesDeg) || ...
+   any(stimSet.innerRightEdgesDeg  <= stimSet.innerLeftEdgesDeg)
     error('Inner aperture must be larger than dot diameters.');
 end
 
@@ -566,101 +703,20 @@ if any(stimSet.verticalSpanDeg <= 0) || any(stimSet.horizontalSpanDeg <= 0)
 end
 end
 
-function trialResult = populateTrialResult(trialIndex, trialSpec, stimInfo, response, params)
-trialResult = initTrialResultStruct();
-trialResult.trialIndex = trialIndex;
-trialResult.comboLabel = trialSpec.comboLabel;
-trialResult.comboMotion = trialSpec.motionCombo;
-trialResult.methodPair = trialSpec.methodPair;
-trialResult.methodPairLabel = trialSpec.methodPair;
-trialResult.freqRatio = trialSpec.freqRatio;
-trialResult.equalFreq = trialSpec.equalFreq;
-trialResult.diffLevelTarget = trialSpec.diffLevel;
-trialResult.signS = trialSpec.signS;
-trialResult.largerSide = stimInfo.largerSide;
-trialResult.isMoving = trialSpec.isMoving;
-trialResult.t1MeanPS = stimInfo.t1MeanPS;
-trialResult.t2MeanPS = stimInfo.t2MeanPS;
-trialResult.psDiffObserved = stimInfo.psDiffObserved;
-trialResult.diffLevelObservedPS = stimInfo.diffLevelObservedPS;
-trialResult.t1MeanDeg = stimInfo.t1MeanDeg;
-trialResult.t2MeanDeg = stimInfo.t2MeanDeg;
-trialResult.expoUsed = params.perceptualExponent;
-trialResult.jitterPS_applied = stimInfo.jitterPS;
-trialResult.targetPSMeans = stimInfo.targetPSMeans;
-trialResult.psTargetsAfterJitter = stimInfo.psTargetsAfterJitter;
-
-if response.didRespond
-    trialResult.didRespond = true;
-    trialResult.responseKey = response.keyName;
-    trialResult.responseRtMs = response.rt * 1000;
-    if strcmpi(response.keyName, '1')
-        trialResult.responseChoice = 'T1';
-    elseif strcmpi(response.keyName, '2')
-        trialResult.responseChoice = 'T2';
-    else
-        trialResult.responseChoice = '';
-    end
-else
-    trialResult.didRespond = false;
-    trialResult.responseKey = '';
-    trialResult.responseChoice = '';
-    trialResult.responseRtMs = NaN;
-end
-
-if trialResult.didRespond
-    if strcmp(trialResult.responseChoice, 'T1')
-        trialResult.correct = stimInfo.t1MeanPS > stimInfo.t2MeanPS;
-    elseif strcmp(trialResult.responseChoice, 'T2')
-        trialResult.correct = stimInfo.t2MeanPS > stimInfo.t1MeanPS;
-    else
-        trialResult.correct = NaN;
-    end
-else
-    trialResult.correct = NaN;
-end
-end
-
-function layout = buildCentralGridLayout(gridConfig)
-inner.centerDeg = [0, 0];
-inner.widthDeg = gridConfig.windowWidthDeg;
-inner.heightDeg = gridConfig.windowHeightDeg;
-inner = updateApertureEdges(inner);
-
-outer = inner;
-outer.widthDeg = inner.widthDeg + 2 * gridConfig.outerPaddingDeg;
-outer.heightDeg = inner.heightDeg + 2 * gridConfig.outerPaddingDeg;
-outer = updateApertureEdges(outer);
-
-cellWidthDeg = inner.widthDeg / gridConfig.cols;
-cellHeightDeg = inner.heightDeg / gridConfig.rows;
-
-colCenters = inner.leftDeg + (0.5:1:gridConfig.cols-0.5) * cellWidthDeg;
-rowCenters = inner.topDeg + (0.5:1:gridConfig.rows-0.5) * cellHeightDeg;
-[gridX, gridY] = meshgrid(colCenters, rowCenters);
-
-layout.innerAperture = inner;
-layout.outerAperture = outer;
-layout.gridX = gridX(:);
-layout.gridY = gridY(:);
-layout.cellWidthDeg = cellWidthDeg;
-layout.cellHeightDeg = cellHeightDeg;
-end
-
 function [xPosDeg, yPosDeg] = placeDotsOnGrid(dotSizesDeg, layout, gridConfig)
-numDots = numel(dotSizesDeg);
+numDots       = numel(dotSizesDeg);
 occupiedCells = false(numel(layout.gridX), 1);
 
 xPosDeg = zeros(1, numDots);
 yPosDeg = zeros(1, numDots);
 
 for dotIdx = 1:numDots
-    placed = false;
+    placed    = false;
     cellOrder = randperm(numel(occupiedCells));
     currentSize = dotSizesDeg(dotIdx);
-    halfSize = currentSize / 2;
+    halfSize    = currentSize / 2;
 
-    cellJitterX = layout.cellWidthDeg / 2 - (halfSize + gridConfig.safetyMarginDeg);
+    cellJitterX = layout.cellWidthDeg  / 2 - (halfSize + gridConfig.safetyMarginDeg);
     cellJitterY = layout.cellHeightDeg / 2 - (halfSize + gridConfig.safetyMarginDeg);
 
     if cellJitterX <= 0 || cellJitterY <= 0
@@ -668,17 +724,34 @@ for dotIdx = 1:numDots
     end
 
     for candidate = cellOrder
-        if occupiedCells(candidate)
+        if occupiedCells(candidate), continue; end
+
+        baseX = layout.gridX(candidate);
+        baseY = layout.gridY(candidate);
+
+        leftLimit   = baseX - (layout.innerAperture.leftDeg  + halfSize + gridConfig.safetyMarginDeg);
+        rightLimit  = (layout.innerAperture.rightDeg - halfSize - gridConfig.safetyMarginDeg) - baseX;
+        topLimit    = baseY - (layout.innerAperture.topDeg   + halfSize + gridConfig.safetyMarginDeg);
+        bottomLimit = (layout.innerAperture.bottomDeg - halfSize - gridConfig.safetyMarginDeg) - baseY;
+
+        maxJitterX = min([gridConfig.maxJitterDeg, cellJitterX, leftLimit, rightLimit]);
+        maxJitterY = min([gridConfig.maxJitterDeg, cellJitterY, topLimit, bottomLimit]);
+
+        if maxJitterX <= 0 || maxJitterY <= 0
             continue;
         end
 
-for dotIdx = 1:numDots
-            if candidateY - halfSize < layout.innerAperture.topDeg + gridConfig.safetyMarginDeg
-                continue;
-            end
-            if candidateY + halfSize > layout.innerAperture.bottomDeg - gridConfig.safetyMarginDeg
-                continue;
-            end
+        for attempt = 1:gridConfig.maxAttemptsPerCell
+            jitterX = (rand * 2 - 1) * maxJitterX;
+            jitterY = (rand * 2 - 1) * maxJitterY;
+
+            candidateX = baseX + jitterX;
+            candidateY = baseY + jitterY;
+
+            if candidateX - halfSize < layout.innerAperture.leftDeg  + gridConfig.safetyMarginDeg, continue; end
+            if candidateX + halfSize > layout.innerAperture.rightDeg - gridConfig.safetyMarginDeg, continue; end
+            if candidateY - halfSize < layout.innerAperture.topDeg   + gridConfig.safetyMarginDeg, continue; end
+            if candidateY + halfSize > layout.innerAperture.bottomDeg- gridConfig.safetyMarginDeg, continue; end
 
             xPosDeg(dotIdx) = candidateX;
             yPosDeg(dotIdx) = candidateY;
@@ -687,9 +760,7 @@ for dotIdx = 1:numDots
             break;
         end
 
-        if placed
-            break;
-        end
+        if placed, break; end
     end
 
     if ~placed
@@ -810,7 +881,7 @@ while true
             if any(firstPress(kb.escKey))
                 abort = true;
                 break;
-            elseif GetSecs >= allowResponseTime && firstPress(kb.spaceKey) > 0
+            elseif GetSecs >= allowResponseTime && any(firstPress(kb.spaceKey))
                 break;
             end
         end
@@ -871,7 +942,7 @@ for lineIdx = 1:numel(instructionLines)
 end
 
 startTime = GetSecs;
-deadline = startTime + durationMs / 1000;
+deadline  = startTime + durationMs / 1000;
 
 if kb.useKbQueueCheck
     KbQueueFlush;
@@ -928,18 +999,20 @@ while GetSecs < deadline && ~response.wasAborted && ~response.didRespond
                 response.wasAborted = true;
                 break;
             else
+                % 1-key
                 if any(firstPress(kb.oneKey) > 0)
                     response.didRespond = true;
-                    response.keyCode = kb.oneKey;
-                    response.keyName = '1';
-                    rtTime = min(firstPress(kb.oneKey(firstPress(kb.oneKey) > 0)));
-                    response.rt = rtTime - startTime;
+                    response.keyCode    = kb.oneKey;
+                    response.keyName    = '1';
+                    rtTimes = firstPress(kb.oneKey(firstPress(kb.oneKey) > 0));
+                    response.rt = min(rtTimes) - startTime;
+                % 2-key
                 elseif any(firstPress(kb.twoKey) > 0)
                     response.didRespond = true;
-                    response.keyCode = kb.twoKey;
-                    response.keyName = '2';
-                    rtTime = min(firstPress(kb.twoKey(firstPress(kb.twoKey) > 0)));
-                    response.rt = rtTime - startTime;
+                    response.keyCode    = kb.twoKey;
+                    response.keyName    = '2';
+                    rtTimes = firstPress(kb.twoKey(firstPress(kb.twoKey) > 0));
+                    response.rt = min(rtTimes) - startTime;
                 end
             end
         end
@@ -951,14 +1024,14 @@ while GetSecs < deadline && ~response.wasAborted && ~response.didRespond
                 break;
             elseif any(keyCode(kb.oneKey))
                 response.didRespond = true;
-                response.keyCode = kb.oneKey;
-                response.keyName = '1';
-                response.rt = keyTime - startTime;
+                response.keyCode    = kb.oneKey;
+                response.keyName    = '1';
+                response.rt         = keyTime - startTime;
             elseif any(keyCode(kb.twoKey))
                 response.didRespond = true;
-                response.keyCode = kb.twoKey;
-                response.keyName = '2';
-                response.rt = keyTime - startTime;
+                response.keyCode    = kb.twoKey;
+                response.keyName    = '2';
+                response.rt         = keyTime - startTime;
             end
         end
     end
@@ -992,13 +1065,94 @@ switch direction
 end
 end
 
+function trialResult = populateTrialResult(trialIndex, trialSpec, stimInfo, response, params)
+trialResult = initTrialResultStruct();
+trialResult.trialIndex = trialIndex;
+trialResult.comboLabel = trialSpec.comboLabel;
+trialResult.comboMotion = trialSpec.motionCombo;
+trialResult.methodPair = trialSpec.methodPair;
+trialResult.methodPairLabel = trialSpec.methodPair;
+trialResult.freqRatio = trialSpec.freqRatio;
+trialResult.equalFreq = trialSpec.equalFreq;
+trialResult.diffLevelTarget = trialSpec.diffLevel;
+trialResult.signS = trialSpec.signS;
+trialResult.largerSide = stimInfo.largerSide;
+trialResult.isMoving = trialSpec.isMoving;
+trialResult.t1MeanPS = stimInfo.t1MeanPS;
+trialResult.t2MeanPS = stimInfo.t2MeanPS;
+trialResult.psDiffObserved = stimInfo.psDiffObserved;
+trialResult.diffLevelObservedPS = stimInfo.diffLevelObservedPS;
+trialResult.t1MeanDeg = stimInfo.t1MeanDeg;
+trialResult.t2MeanDeg = stimInfo.t2MeanDeg;
+trialResult.expoUsed = params.perceptualExponent;
+trialResult.jitterPS_applied = stimInfo.jitterPS;
+trialResult.targetPSMeans = stimInfo.targetPSMeans;
+trialResult.psTargetsAfterJitter = stimInfo.psTargetsAfterJitter;
+
+if response.didRespond
+    trialResult.didRespond    = true;
+    trialResult.responseKey   = response.keyName;  % '1' or '2'
+    trialResult.responseRtMs  = response.rt * 1000;
+    if strcmpi(response.keyName, '1')
+        trialResult.responseChoice = 'T1';
+    elseif strcmpi(response.keyName, '2')
+        trialResult.responseChoice = 'T2';
+    else
+        trialResult.responseChoice = '';
+    end
+else
+    trialResult.didRespond    = false;
+    trialResult.responseKey   = '';
+    trialResult.responseChoice = '';
+    trialResult.responseRtMs  = NaN;
+end
+
+if trialResult.didRespond
+    if strcmp(trialResult.responseChoice, 'T1')
+        trialResult.correct = stimInfo.t1MeanPS > stimInfo.t2MeanPS;
+    elseif strcmp(trialResult.responseChoice, 'T2')
+        trialResult.correct = stimInfo.t2MeanPS > stimInfo.t1MeanPS;
+    else
+        trialResult.correct = NaN;
+    end
+else
+    trialResult.correct = NaN;
+end
+end
+
+function layout = buildCentralGridLayout(gridConfig)
+inner.centerDeg = [0, 0];
+inner.widthDeg  = gridConfig.windowWidthDeg;
+inner.heightDeg = gridConfig.windowHeightDeg;
+inner           = updateApertureEdges(inner);
+
+outer = inner;
+outer.widthDeg  = inner.widthDeg  + 2 * gridConfig.outerPaddingDeg;
+outer.heightDeg = inner.heightDeg + 2 * gridConfig.outerPaddingDeg;
+outer           = updateApertureEdges(outer);
+
+cellWidthDeg  = inner.widthDeg  / gridConfig.cols;
+cellHeightDeg = inner.heightDeg / gridConfig.rows;
+
+colCenters = inner.leftDeg + (0.5:1:gridConfig.cols-0.5) * cellWidthDeg;
+rowCenters = inner.topDeg  + (0.5:1:gridConfig.rows-0.5) * cellHeightDeg;
+[gridX, gridY] = meshgrid(colCenters, rowCenters);
+
+layout.innerAperture = inner;
+layout.outerAperture = outer;
+layout.gridX         = gridX(:);
+layout.gridY         = gridY(:);
+layout.cellWidthDeg  = cellWidthDeg;
+layout.cellHeightDeg = cellHeightDeg;
+end
+
 function aperture = updateApertureEdges(aperture)
-halfWidth = aperture.widthDeg / 2;
+halfWidth  = aperture.widthDeg / 2;
 halfHeight = aperture.heightDeg / 2;
 
-aperture.leftDeg = aperture.centerDeg(1) - halfWidth;
-aperture.rightDeg = aperture.centerDeg(1) + halfWidth;
-aperture.topDeg = aperture.centerDeg(2) - halfHeight;
+aperture.leftDeg   = aperture.centerDeg(1) - halfWidth;
+aperture.rightDeg  = aperture.centerDeg(1) + halfWidth;
+aperture.topDeg    = aperture.centerDeg(2) - halfHeight;
 aperture.bottomDeg = aperture.centerDeg(2) + halfHeight;
 end
 

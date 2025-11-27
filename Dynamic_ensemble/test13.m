@@ -232,7 +232,7 @@ function abort = presentFixation(dp, durationMs, kb)
 abort = false;
 numFrames = max(1, round((durationMs/1000) / dp.ifi));
 firstFrame = true;
-for frameIdx = 1:numFrames %#ok<NASGU>
+for frameIdx = 1:numFrames
     Screen('FillRect', dp.wPtr, dp.bkColor);
     make_fixation(dp);
     if firstFrame
@@ -704,7 +704,7 @@ end
 numFrames = max(1, round((durationMs/1000) / dp.ifi));
 vbl = Screen('Flip', dp.wPtr);
 
-for frameIdx = 1:numFrames %#ok<NASGU>
+for frameIdx = 1:numFrames 
     Screen('FillRect', dp.wPtr, dp.bkColor);
     vbl = Screen('Flip', dp.wPtr, vbl + 0.5 * dp.ifi);
     if shouldAbort(kb)
