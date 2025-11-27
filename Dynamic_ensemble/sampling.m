@@ -10,7 +10,7 @@ function sampling()
 %   The script can be converted to a function handle for batch
 %   generation, but the default usage is to run it interactively.
 
-repeatCount = 30; % Set the repeat count per combination here (edit as needed).
+repeatCount = 1; % Set the repeat count per combination here (edit as needed).
 
 subID = strtrim(input('Enter subject ID (e.g., sub01): ', 's'));
 if isempty(subID)
