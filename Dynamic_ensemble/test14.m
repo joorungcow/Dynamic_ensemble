@@ -7,10 +7,10 @@ if isempty(subID)
 end
 
 gender = upper(strtrim(input('성별을 입력하세요 (M/F): ', 's')));
-ageStr = strtrim(input('만 나이를 숫자로 입력하세요 (예: 25): ', 's'));
+ageStr = strtrim(input('만 나이를 숫자로 입력하세요: ', 's'));
 age    = str2double(ageStr);
 hand   = upper(strtrim(input('주로 사용하는 손을 입력하세요 (R/L): ', 's')));
-colorVision = upper(strtrim(input('시력 이상 또는 색약/색맹 여부가 있으면 Y, 없으면 N: ', 's')));
+colorVision = upper(strtrim(input('시력 이상 또는 색약/색맹 여부 Y / N: ', 's')));
 
 planFile = fullfile('sampling', sprintf('%s_sampling.mat', subID));
 if ~exist(planFile, 'file')
@@ -89,7 +89,7 @@ results.meta.motionParams = plan.motionParams;
 results.meta.timingParams = plan.timingParams;
 results.meta.gridConfig   = plan.gridConfig;
 
-saveFileName = sprintf('results_%s_%s.mat', subID, datestr(now, 'yyyymmdd_HHMMSS'));
+saveFileName = sprintf('results_%s_%s.mat', subID);
 
 %% ----------------- Main try/catch -----------------
 try
@@ -220,9 +220,9 @@ catch ME
     rethrow(ME);
 end
 
-%% ========================================================================
+
 %% =================== Helper functions ===================================
-%% ========================================================================
+
 
 function resultStruct = initTrialResultStruct()
 resultStruct = struct( ...
@@ -252,7 +252,7 @@ resultStruct = struct( ...
     'methodPairLabel', '', ...
     'comboMotion', '', ...
     'psTargetsAfterJitter', [], ...
-    'isPractice', false );
+    'isPractice', false); 
 end
 
 function showBlockIntro(dp, labelText)
@@ -284,11 +284,15 @@ end
 
 lines = {
     '이 실험은 총 3 block으로 진행됩니다.';
+    ' ';
     '각 block이 끝날 때마다 실험자를 불러';
+    ' ';
     '다음 block 설명을 듣고, 실험을 진행해주세요.';
     ' ';
     '스페이스바를 누르면 본 실험을 시작합니다.';
+    ' ';
     'P 키를 누르면 연습 시행을 시작합니다.';
+    ' ';
 };
 
 Screen('FillRect', dp.wPtr, dp.bkColor);
@@ -466,7 +470,6 @@ end
 end
 
 function [stimPair, info] = buildStimulusFromPlan(trialSpec, params, layout, gridConfig)
-% 그대로 test13.m의 buildStimulusFromPlan 복사
 expo = params.perceptualExponent;
 freqCounts = getFrequencyRatioCounts(trialSpec.freqRatio);
 eqCounts   = params.equalFreqCounts;
