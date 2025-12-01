@@ -9,7 +9,7 @@ function sampling2()
 %   (plan.practiceBlocks), then saves the plan to ./sampling/<subID>_sampling.mat.
 
 %% ----------------- Core configuration -----------------
-repeatCount  = 30; % Main experiment repeat count per combination
+repeatCount  = 8; % Main experiment repeat count per combination
 repeatCountP = 1;  % Practice repeat count per combination
 
 subID = strtrim(input('Enter subject ID (e.g., sub01): ', 's'));
