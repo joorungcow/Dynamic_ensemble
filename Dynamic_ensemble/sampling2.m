@@ -78,10 +78,10 @@ motionParams.speedDegPerSec = 1.5;
 
 %% ----------------- Timing configuration (ms unless noted) -----------------
 timingParams = struct();
-timingParams.fixationMs = 300;
+timingParams.fixationMs = 800;
 timingParams.stimDurationMs = 500;
 timingParams.isiDurationMs = 1000;
-timingParams.postTrialMs = 1000;
+timingParams.postTrialMs = 2000;
 timingParams.breakDurationSec = 20;
 
 %% ----------------- Grid layout configuration -----------------
