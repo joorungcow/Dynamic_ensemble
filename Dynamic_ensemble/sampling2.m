@@ -11,7 +11,6 @@ function sampling2()
 %% ----------------- Core configuration -----------------
 repeatCount  = 8; % Main experiment repeat count per combination
 repeatCountP = 1;  % Practice repeat count per combination
-
 subID = strtrim(input('Enter subject ID (e.g., sub01): ', 's'));
 if isempty(subID)
     error('Subject ID must be provided.');
@@ -20,7 +19,7 @@ blockOrderStr = upper(strtrim(input('Enter block order (SMR, SRM, MSR, MRS, RSM,
 blockLetters = parseBlockOrder(blockOrderStr);
 
 expo = 0.76;
-diffLevels = [0.06 0.12 0.18 0.24 0.30 0.36];
+diffLevels = [0 0.03 0.06 0.12 0.24 0.48];
 
 freqRatios = struct( ...
     'label',  {'6:2','5:3','3:5','2:6'}, ...
@@ -81,7 +80,7 @@ timingParams = struct();
 timingParams.fixationMs = 800;
 timingParams.stimDurationMs = 500;
 timingParams.isiDurationMs = 1000;
-timingParams.postTrialMs = 2000;
+timingParams.postTrialMs = 750; % 2 times
 timingParams.breakDurationSec = 20;
 
 %% ----------------- Grid layout configuration -----------------
