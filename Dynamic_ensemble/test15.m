@@ -139,6 +139,21 @@ try
         block = plan.blocks(b);
         showBlockIntro(dp, sprintf('블록 %d / %d (%s)', b, numel(plan.blocks), block.label));
 
+        numTrialsInBlock = numel(block.trials);
+        midBreakTrialIdx = [];
+
+        if isfield(timingParams, 'withinBlockBreakFractions') && ...
+       ~isempty(timingParams.withinBlockBreakFractions)
+
+        fracs = timingParams.withinBlockBreakFractions(:).';
+        fracs = fracs(fracs > 0 & fracs < 1);
+        fracs = unique(fracs);
+
+        if ~isempty(fracs)
+            midBreakTrialIdx = unique(round(fracs * numTrialsInBlock));
+        end
+        end
+
         for t = 1:numel(block.trials)
             trialSpec = block.trials(t);
             if abortExperiment
@@ -186,6 +201,13 @@ try
                 break;
             end
             
+        if ~abortExperiment && ~isempty(midBreakTrialIdx) && ismember(t, midBreakTrialIdx)
+            abortExperiment = presentBreakScreen(dp, kb, breakDurationSec);
+            if abortExperiment
+                break;
+            end
+        end
+
             if abortExperiment
                 break;
             end
@@ -368,7 +390,7 @@ numFrames = max(1, round((durationMs/1000) / dp.ifi));
 firstFrame = true;
 vbl = 0;
 
-for frameIdx = 1:numFrames %#ok<NASGU>
+for frameIdx = 1:numFrames 
     Screen('FillRect', dp.wPtr, dp.bkColor);
     % draw fixation here (color version)
     fixSize   = 20;
@@ -854,7 +876,7 @@ end
 numFrames = max(1, round((durationMs/1000) / dp.ifi));
 vbl = Screen('Flip', dp.wPtr);
 
-for frameIdx = 1:numFrames %#ok<NASGU>
+for frameIdx = 1:numFrames 
     Screen('FillRect', dp.wPtr, dp.bkColor);
     vbl = Screen('Flip', dp.wPtr, vbl + 0.5 * dp.ifi);
     if shouldAbort(kb)
