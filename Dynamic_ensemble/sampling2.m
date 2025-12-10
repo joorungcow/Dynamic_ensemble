@@ -9,7 +9,7 @@ function sampling2()
 %   (plan.practiceBlocks), then saves the plan to ./sampling/<subID>_sampling.mat.
 
 %% ----------------- Core configuration -----------------
-repeatCount  = 8; % Main experiment repeat count per combination
+repeatCount  = 1; % Main experiment repeat count per combination
 repeatCountP = 1;  % Practice repeat count per combination
 subID = strtrim(input('Enter subject ID (e.g., sub01): ', 's'));
 if isempty(subID)
@@ -82,6 +82,7 @@ timingParams.stimDurationMs = 500;
 timingParams.isiDurationMs = 1000;
 timingParams.postTrialMs = 750; % 2 times
 timingParams.breakDurationSec = 20;
+timingParams.withinBlockBreakFractions = [0.5]; % blank is only one break every block
 
 %% ----------------- Grid layout configuration -----------------
 gridConfig = struct();
