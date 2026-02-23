@@ -936,7 +936,7 @@ end
 
 function abort = presentBreakScreen(dp, kb, waitSeconds)
 if nargin < 3 || isempty(waitSeconds)
-    waitSeconds = 20;
+    waitSeconds = 15;
 end
 
 abort = false;
