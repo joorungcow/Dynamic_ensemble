@@ -19,7 +19,8 @@ blockOrderStr = upper(strtrim(input('Enter block order (SMR, SRM, MSR, MRS, RSM,
 blockLetters = parseBlockOrder(blockOrderStr);
 
 expo = 0.76;
-diffLevels = [0.02 0.04 0.08 0.16 0.32];
+diffLevels = [0];
+% diffLevels = [0.02 0.04 0.08 0.16 0.32];
 
 freqRatios = struct( ...
     'label',  {'6:2','5:3','3:5','2:6'}, ...
