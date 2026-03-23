@@ -82,8 +82,8 @@ timingParams = struct();
 timingParams.fixationMs = 800;
 timingParams.stimDurationMs = 500;
 timingParams.isiDurationMs = 1000;
-timingParams.postTrialMs = 750; % 2 times
-timingParams.breakDurationSec = 20;
+timingParams.postTrialMs = 500; % 2 times
+timingParams.breakDurationSec = 15;
 timingParams.withinBlockBreakFractions = [0.5]; % blank is only one break every block
 
 %% ----------------- Grid layout configuration -----------------
